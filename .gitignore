@@ -1,0 +1,8 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# This repo holds only committed .webp assets + SWA config.
+# No build output, no node_modules — the extraction tooling lives in
+# exiledata-api/dat-export and writes its delta directly into this tree.

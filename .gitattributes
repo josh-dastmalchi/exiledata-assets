@@ -1,0 +1,5 @@
+# Normalize text to LF; treat item art as binary (no EOL/diff munging).
+* text=auto eol=lf
+*.webp binary
+*.png binary
+*.dds binary
