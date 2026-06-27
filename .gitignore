@@ -4,5 +4,14 @@ Thumbs.db
 desktop.ini
 
 # This repo holds only committed .webp assets + SWA config.
-# No build output, no node_modules — the extraction tooling lives in
-# exiledata-api/dat-export and writes its delta directly into this tree.
+# No build output — the extraction tooling lives in exiledata-api/dat-export
+# and writes its delta directly into this tree. The only npm use is `npm start`
+# (the local SWA dev server via npx); nothing is installed into the repo, but
+# guard against it and the CLI's scratch output just in case.
+node_modules/
+.swa/
+swa-cli-output/
+
+# 60fps source webms, kept on disk as a re-encode safety net but NOT shipped/referenced.
+# The canonical art/videos/skilltutorials/*.webm are the downscaled 640x360@30fps versions.
+art/videos/skilltutorials-orig60fps/
