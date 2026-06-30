@@ -6,7 +6,6 @@
   "scripts": {
     "start": "npx -y @azure/static-web-apps-cli start . --port 4201",
     "stage": "node scripts/stage-deploy.mjs",
-    "predeploy": "node scripts/stage-deploy.mjs",
-    "deploy": "npx -y @azure/static-web-apps-cli deploy ./dist-deploy --env production"
+    "deploy": "node --env-file-if-exists=.env scripts/deploy.mjs"
   }
 }

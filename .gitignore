@@ -13,6 +13,10 @@ node_modules/
 swa-cli-output/
 dist-deploy/
 
+# Local secrets — never commit. The SWA deploy token lives here; see .env.example.
+.env
+.env.local
+
 # 60fps source webms, kept on disk as a re-encode safety net but NOT shipped/referenced.
 # The canonical art/videos/skilltutorials/*.webm are the downscaled 640x360@30fps versions.
 art/videos/skilltutorials-orig60fps/

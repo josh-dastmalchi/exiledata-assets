@@ -12,16 +12,12 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '');
 const out = join(root, 'dist-deploy');
 
-// Repo plumbing that must never ship to the CDN.
+// Repo plumbing that must never ship to the CDN. (All top-level dotfiles — .git, .env, .gitignore,
+// … — are dropped separately below, so a real .env with the deploy token can never be uploaded.)
 const EXCLUDE_TOP = new Set([
-  '.git',
-  '.github',
-  '.gitignore',
-  '.gitattributes',
   'node_modules',
   'scripts',
   'dist-deploy',
-  '.swa',
   'swa-cli-output',
   'package.json',
   'package-lock.json',
@@ -35,6 +31,7 @@ mkdirSync(out, { recursive: true });
 
 // Copy each kept top-level entry individually (cpSync refuses to copy root into its own subdir).
 for (const e of readdirSync(root, { withFileTypes: true })) {
+  if (e.name.startsWith('.')) continue; // never ship dotfiles (.git, .env, .gitignore, …)
   if (EXCLUDE_TOP.has(e.name)) continue;
   const src = join(root, e.name);
   // art/ currently holds only the deferred videos; copy it but skip that subtree.
