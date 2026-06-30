@@ -21,9 +21,11 @@ if (!process.env.SWA_CLI_DEPLOYMENT_TOKEN) {
   process.exit(1);
 }
 
-// 3. Upload. The CLI picks the token up from process.env on its own.
+// 3. Upload. The CLI picks the token up from process.env on its own. (Use npx.cmd on Windows
+// so we avoid shell:true and its DEP0190 arg-escaping warning.)
+const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 execFileSync(
-  'npx',
+  npx,
   ['-y', '@azure/static-web-apps-cli', 'deploy', './dist-deploy', '--env', 'production'],
-  { stdio: 'inherit', shell: true },
+  { stdio: 'inherit' },
 );
