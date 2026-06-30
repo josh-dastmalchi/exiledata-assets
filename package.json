@@ -4,6 +4,9 @@
   "private": true,
   "description": "Static CDN of PoE2 item art (.webp). `npm start` serves the tree locally over HTTP on :4201, honoring staticwebapp.config.json so local dev mirrors the deployed Azure SWA.",
   "scripts": {
-    "start": "npx -y @azure/static-web-apps-cli start . --port 4201"
+    "start": "npx -y @azure/static-web-apps-cli start . --port 4201",
+    "stage": "node scripts/stage-deploy.mjs",
+    "predeploy": "node scripts/stage-deploy.mjs",
+    "deploy": "npx -y @azure/static-web-apps-cli deploy ./dist-deploy --env production"
   }
 }

@@ -11,6 +11,7 @@ desktop.ini
 node_modules/
 .swa/
 swa-cli-output/
+dist-deploy/
 
 # 60fps source webms, kept on disk as a re-encode safety net but NOT shipped/referenced.
 # The canonical art/videos/skilltutorials/*.webm are the downscaled 640x360@30fps versions.
