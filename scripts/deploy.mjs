@@ -28,7 +28,7 @@ execFileSync(
   { stdio: 'inherit', shell: true },
 );
 
-// 4. Friendly pointer (the domain is public, not a secret).
-if (process.env.ASSETS_URL) {
-  console.log(`\nDeployed. Assets serve at ${process.env.ASSETS_URL} once Cloudflare DNS points there.`);
+// 4. Friendly pointer to the SWA origin (not a secret).
+if (process.env.SWA_URL) {
+  console.log(`\nDeployed to ${process.env.SWA_URL}.`);
 }
