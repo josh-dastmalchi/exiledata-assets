@@ -1,0 +1,14 @@
+# Cloudflare Pages response headers (https://developers.cloudflare.com/pages/configuration/headers/).
+# Staged into dist-deploy/ by scripts/stage-deploy.mjs, where Pages consumes it.
+#
+# Precedence: when several rules match one path, the LAST matching rule wins per header.
+
+# CORS for every asset: the UI (exiledata.com) fetches art/videos cross-origin from this host.
+/*
+  Access-Control-Allow-Origin: *
+
+# Game art + skill-tutorial videos: stable paths, cache hard for a year.
+/*.webp
+  Cache-Control: public, max-age=31536000, immutable
+/*.webm
+  Cache-Control: public, max-age=31536000, immutable

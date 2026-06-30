@@ -3,17 +3,18 @@
 Thumbs.db
 desktop.ini
 
-# This repo holds only committed .webp assets + SWA config.
-# No build output — the extraction tooling lives in exiledata-api/dat-export
-# and writes its delta directly into this tree. The only npm use is `npm start`
-# (the local SWA dev server via npx); nothing is installed into the repo, but
-# guard against it and the CLI's scratch output just in case.
+# This repo holds only committed .webp art + .webm videos + Cloudflare Pages config (_headers).
+# No build output — the extraction tooling lives in exiledata-api/dat-export and writes its delta
+# directly into this tree. The only npm use is `npm start` (local wrangler dev server via npx) and
+# `npm run deploy` (stage + wrangler upload); nothing is installed into the repo, but guard against
+# it and the staging/scratch output just in case.
 node_modules/
 .swa/
 swa-cli-output/
+.wrangler/
 dist-deploy/
 
-# Local secrets — never commit. The SWA deploy token lives here; see .env.example.
+# Local secrets — never commit. The Cloudflare API token lives here; see .env.example.
 .env
 .env.local
 
