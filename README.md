@@ -16,10 +16,11 @@ e.g.  /2DItems/Currency/CurrencyRerollRare.webp
 
 ```
 exiledata-assets/
-  2DItems/...                         # the webp tree (artPath mirrored, ~2.6k files)
-  staticwebapp.config.json            # immutable cache on *.webp, no SPA fallback, CORS
-  index.html / 404.html               # landing + real 404 (assets must 404, not rewrite)
-  .github/workflows/                  # Azure Static Web Apps deploy
+  2DItems/  2dart/  textures/          # the webp trees (artPath mirrored, ~11.6k files)
+  art/videos/skilltutorials/           # skill-tutorial webm — LOCAL ONLY (too big for SWA, not deployed)
+  staticwebapp.config.json             # immutable cache on *.webp, no SPA fallback, CORS
+  index.html / 404.html                # landing + real 404 (assets must 404, not rewrite)
+  scripts/stage-deploy.mjs             # builds the deploy payload (webp + config; videos excluded)
 ```
 
 ## How images get here (the pipeline)
@@ -48,10 +49,31 @@ a full re-export.
 
 ## Deploy
 
-**Azure Static Web Apps** (chosen for instant custom domain + free managed HTTPS). Pushes
-to `main` deploy the current tree; SWA uploads the whole folder, which is fine at this
-scale (item icons are tiny). `staticwebapp.config.json` sets long immutable caching on
-`*.webp` and disables the SPA fallback so a missing image returns a real `404`.
+**Azure Static Web Apps** (Free tier) as the origin, **fronted by Cloudflare** for edge
+caching + TLS. Deploys run from local with the SWA CLI — there is no GitHub Actions pipeline
+(the repo has no remote, and the video set would blow the upload size cap):
 
-> If the library ever approaches the SWA app-size ceiling (250 MB Free / 500 MB Standard),
-> the escape hatch is Blob Storage + Front Door with `azcopy sync` (delta-only upload).
+```bash
+export SWA_CLI_DEPLOYMENT_TOKEN=<token>   # az staticwebapp secrets list … / portal
+npm run deploy                            # stages dist-deploy/ then uploads it
+```
+
+`scripts/stage-deploy.mjs` excludes `art/videos/` (~800 MB) so the payload (~65 MB / ~11.6k
+files) fits the Free **250 MB** size cap and ~15k-file cap. `staticwebapp.config.json` sets
+long immutable caching on `*.webp` and disables the SPA fallback so a missing image returns a
+real `404`. The videos stay local until they get a Blob Storage + CDN home.
+
+### Routing (Cloudflare → SWA)
+
+- DNS: `CNAME assets → <swa>.azurestaticapps.net`, **proxied (orange cloud)** so Cloudflare's
+  edge cache fronts SWA — important because SWA Free has a ~100 GB/mo bandwidth quota; Cloudflare
+  serves the cached `.webp` and only misses reach the origin.
+- TLS: Cloudflare SSL/TLS mode **Full (strict)**. Do **not** use "Flexible" — SWA forces HTTPS,
+  which becomes a redirect loop.
+- Validate the SWA custom domain via **TXT** (works while the CNAME is proxied), or set the CNAME
+  DNS-only until SWA issues its managed cert, then flip to proxied.
+- The UI consumes this as its prod `assetsUrl = https://assets.<domain>`.
+
+> **Cache caveat:** `*.webp` is `immutable` and paths are stable (not content-hashed). On a patch
+> that *overwrites* an existing art path, purge those paths from Cloudflare — otherwise the edge
+> (and browsers) serve the stale image until the 1-year TTL expires. New paths are unaffected.
