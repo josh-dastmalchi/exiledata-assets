@@ -27,8 +27,3 @@ execFileSync(
   ['-y', '@azure/static-web-apps-cli', 'deploy', './dist-deploy', '--env', 'production'],
   { stdio: 'inherit', shell: true },
 );
-
-// 4. Friendly pointer to the SWA origin (not a secret).
-if (process.env.SWA_URL) {
-  console.log(`\nDeployed to ${process.env.SWA_URL}.`);
-}
