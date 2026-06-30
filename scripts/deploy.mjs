@@ -27,3 +27,8 @@ execFileSync(
   ['-y', '@azure/static-web-apps-cli', 'deploy', './dist-deploy', '--env', 'production'],
   { stdio: 'inherit', shell: true },
 );
+
+// 4. Friendly pointer (the domain is public, not a secret).
+if (process.env.ASSETS_URL) {
+  console.log(`\nDeployed. Assets serve at ${process.env.ASSETS_URL} once Cloudflare DNS points there.`);
+}
