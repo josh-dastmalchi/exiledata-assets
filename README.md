@@ -29,12 +29,15 @@ output. To (re)generate after a game patch:
 
 ```bash
 cd exiledata-api/dat-export
-node extract-assets.mjs            # reads data/base-items.json artPaths,
+node extract-assets.ts             # reads data/base-items.json artPaths,
                                    # decodes Art/<artPath>.dds from the game bundles,
                                    # writes <artPath>.webp into ../../exiledata-assets
 ```
 
-Requires **ImageMagick** (`magick`, with the webp delegate) on PATH. Source is the local
+Item art is uncompressed (DX10/R8G8B8A8), so `extract-assets.ts` decodes it in **pure Node**
+via `sharp` — **no ImageMagick**. The block-compressed UI art that also lands in this repo
+(skill/buff icons, gem-hover posters via `extract-ui-art.ts` / `extract-hover-images.ts`: BC1/BC7)
+**does** require **ImageMagick** (`magick`, with the webp delegate) on PATH. Source is the local
 game install (`config.json` `steam`) or GGG's patch CDN (`config.json` `patch`) — no game
 install needed in CI.
 

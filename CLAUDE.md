@@ -38,3 +38,11 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   e.g. videos live at `Art/Videos/...`), **alternate texture/asset paths**, and **all `ModDomains`**
   (map=6, jewel=11, tincture=34, desecrated=28). The user is the domain expert; if they say it
   exists, it exists — keep looking. See memory `dont-declare-data-absent`.
+- **Dev server: real `ng build --watch`, NEVER `ng serve`.** `ng serve` does NOT reflect production —
+  it runs dev-mode client rendering and skips the static prerender (`outputMode: static`) the real
+  build produces, so it hides SSG / hydration / TransferState-inlining bugs (the exact things we keep
+  needing to verify). Use a real build that watches: `npm --prefix /c/dev/exiledata-ui run watch`
+  (emits `dist/exiledata-ui/browser`) and serve that output statically (SWA CLI, like the assets
+  repo). One-shot `npm --prefix /c/dev/exiledata-ui run build` for verification. Caveat: **restart**
+  the watch/build after adding a new lazy-loaded component or installing a dep — esbuild caches module
+  resolution and won't pick up brand-new files. See memory `exiledata-ui-dev-server`.
