@@ -46,3 +46,25 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   repo). One-shot `npm --prefix /c/dev/exiledata-ui run build` for verification. Caveat: **restart**
   the watch/build after adding a new lazy-loaded component or installing a dep — esbuild caches module
   resolution and won't pick up brand-new files. See memory `exiledata-ui-dev-server`.
+
+## Local dev & Cloudflare deploys — binding
+
+**Full stack documented in [`DEVELOPMENT.md`](DEVELOPMENT.md)** (this repo) — read it before local-dev or
+deploy work. UI → Pages (`exiledata.com`), worker → `exiledata.com/api/*`, assets → Pages
+(`assets.exiledata.com`). Each deployable repo has a gitignored `.env` (`CLOUDFLARE_API_TOKEN` +
+`CLOUDFLARE_ACCOUNT_ID`); deploy via that repo's `npm run deploy`. Non-negotiable gotchas:
+
+- **Worker local dev:** launch wrangler ONLY via `npm --prefix /c/dev/exiledata-worker run dev` /
+  `run db:migrate:local` (cwd = worker repo) — a different cwd or `--persist-to <abs>` hashes a *different*
+  local D1 file and your data looks empty.
+- **NEVER seed the local D1 with `node:sqlite`** — Node 24's SQLite bumps the file format and Miniflare
+  can't reopen it (all D1 endpoints 500). Seed via `wrangler d1 execute … --local --file`, or trigger the
+  scheduled handler: `curl -X POST http://localhost:8787/cdn-cgi/handler/scheduled`. To recover: delete
+  `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite` (keep `metadata.sqlite`) + re-`db:migrate:local`.
+- **UI eval shim:** the dev config points at `localhost:8787`; a tiny Node shim there proxying `/api/*` to
+  the live worker (cache-busting `/valuation/snapshot`) is the lightest way to eval the UI on real data.
+- **Deploy:** worker `npm run deploy` (registers Workflow + Cron `0 * * * *`; route bound by hand in the
+  dashboard). UI `npm run deploy` (Pages; **stop the `watch` first**). Remote D1: `run db:migrate:remote`;
+  one-off seed via `node --env-file-if-exists=.env node_modules/wrangler/bin/wrangler.js d1 execute exiledata
+  --remote --file <sql>` (chunk ~50 rows/INSERT). `/api/valuation/snapshot` is edge-cached ~1h; token can't
+  purge. See memory `local-dev-and-deploy`.
