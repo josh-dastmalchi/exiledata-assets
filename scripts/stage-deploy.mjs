@@ -26,6 +26,7 @@ const EXCLUDE_TOP = new Set([
   'package-lock.json',
   'README.md',
   'CLAUDE.md',
+  'DEVELOPMENT.md',
 ]);
 // The 60fps source webms are gitignored and far larger than the shipped 30fps versions — never ship.
 const ORIG60 = join(root, 'art', 'videos', 'skilltutorials-orig60fps');

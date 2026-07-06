@@ -4,15 +4,44 @@ The full dev/deploy stack for the **exiledata** multi-repo system. Siblings unde
 
 | Repo | Role | Deploys to | Live URL |
 | --- | --- | --- | --- |
-| `exiledata-ui` | Angular 22 browser app (SSG/prerender, zoneless, signals, Tailwind v4) | Cloudflare **Pages** | `exiledata.com` |
-| `exiledata-worker` | Cloudflare **Worker** API (Hono + D1 + R2 + Workflows + Cron) | Cloudflare Workers | `exiledata.com/api/*` |
-| `exiledata-assets` | Static art/data (webp icons, UI art, catalog JSON) | Cloudflare **Pages** | `assets.exiledata.com` |
+| `exiledata-ui` | Angular 22 app (SSG/prerender) **+ the merged `worker/` API** (Hono + D1 + R2 + Workflows + Cron) | Cloudflare **Worker w/ static assets** | `exiledata.com` (+ `/api/*`) |
+| `exiledata-assets` | Static art/data (webp icons, UI art, catalog JSON) | Cloudflare **Pages** (→ static-assets) | `assets.exiledata.com` |
 | `exiledata-extraction` | PoE2 dat/asset extraction tooling (offline; not deployed) | — | — |
+| `exiledata-worker` | **Legacy standalone worker — being retired.** Its source now lives in `exiledata-ui/worker/`. | (until cutover) | `exiledata.com/api/*` |
+
+**Architecture (2026-07 consolidation).** We moved off the old split model (UI on Pages + a separate
+Worker bolted on at `/api/*` via a hand-made dashboard route) to Cloudflare's recommended **single Worker
+with attached static assets**: one Worker owns `exiledata.com`, serving the prerendered site from its
+`[assets]` binding and the `/api/*` Hono app from code. The worker source was merged into
+`exiledata-ui/worker/`; the UI repo is now **self-contained** (its catalog inputs are vendored, so it
+builds in single-repo CI). See **Consolidated deploy** below. The split model still runs live until the
+domain **cutover** (last step) is done.
 
 **Prereqs:** system Node is v24 — run `node`/`npm`/`npx` **bare** (never a PATH prefix). Each deployable
 repo has a **gitignored `.env`** with `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` (copy from
 `.env.example`). The token needs Workers Scripts·Edit, D1·Edit, R2·Edit, Cloudflare Pages·Edit. It does
 **not** have Zone·Cache-Purge or Zone·Workers-Routes — those are managed by hand in the dashboard.
+
+**Repos are on GitHub** (`github.com/josh-dastmalchi/exiledata-{ui,worker,assets}`), which enables
+Cloudflare **git-based builds** (Workers Builds / Pages Git) so deploys run on CF's infra, not locally.
+
+### Merged `exiledata-ui` layout
+
+```
+exiledata-ui/
+  src/                     Angular app (unchanged)
+  data-src/                VENDORED catalog JSON (committed, ~22MB) — the build's inputs, so CI is self-contained.
+                           Refresh from extraction with its `npm run sync:ui`; copy-catalog reads this (was the sibling repo).
+  public/_redirects        /valuation → /index.csr CSR-shell rewrite (honored by Pages AND Workers assets)
+  public/_headers          immutable cache headers for hashed assets
+  worker/                  MERGED API worker (src/ migrations/ test/ scripts/ tsconfig.json vitest.config.ts)
+  wrangler.toml            unified: main=worker/src/index.ts, [assets].directory=dist/exiledata-ui/browser, D1/R2/Workflow/Cron
+  scripts/deploy-app.mjs   unified deploy (build → guard → wrangler deploy); scripts/deploy.mjs = legacy Pages (until cutover)
+```
+
+The worker's `fetch` owns `/api/*` (Hono) and delegates everything else to `env.ASSETS.fetch` (which
+applies `_headers`/`_redirects`). `wrangler.toml`'s `run_worker_first=["/api/*"]` serves static assets
+directly in production for speed; the code delegation is the correctness net whenever the worker is reached.
 
 ---
 
@@ -29,10 +58,15 @@ npm --prefix /c/dev/exiledata-ui run watch     # ng build --watch --configuratio
                                                 # → dist/exiledata-ui/browser  (rebuilds on save)
 ```
 
-- **Serve the output** with a static server that has an SPA/CSR fallback. Client-rendered routes
-  (`/valuation`, `/valuation/:category`) have **no prerendered `index.html`** — unmatched paths must fall
-  back to `browser/index.csr.html` (the boot shell). Prerendered routes (everything else) serve their own
-  `index.html`. `wrangler pages dev dist/exiledata-ui/browser` or any static server with that fallback works.
+- **Serve the output.** The lightest way that mirrors production is `npm --prefix /c/dev/exiledata-ui run
+  worker:dev` (`wrangler dev`) — it serves the built assets **and** the `/api/*` worker from one origin
+  (`:8787`), applying `_headers`/`_redirects` (so the `/valuation` CSR-shell rewrite works). Run it
+  alongside `watch`. (Any static server with an SPA/CSR fallback also works: client-rendered routes
+  `/valuation`, `/valuation/:category` have **no** prerendered `index.html` and must fall back to
+  `browser/index.csr.html`; the `_redirects` rule handles this.)
+- **Catalog inputs are vendored** in `data-src/` (committed). copy-catalog reads them at build (was the
+  sibling extraction repo). After re-extracting, refresh with `npm --prefix /c/dev/exiledata-extraction/dat-export
+  run sync:ui` and commit `exiledata-ui/data-src`. (Override the source path with `CATALOG_SRC` if needed.)
 - **API base**: `environment.development.ts` → `apiUrl: http://localhost:8787/api`; production
   `environment.ts` → `/api` (same-origin). So the watched build expects the worker (or a shim) on **:8787**.
 - **Restart the watch after adding a new lazy-loaded component or installing a dep** — esbuild caches module
@@ -78,56 +112,57 @@ TS (Node 24 strips types — `await import(pathToFileURL('…/src/exchange.ts').
 `/valuation/snapshot` (`?bust=<ts>`) to dodge the edge cache. This avoids the local-D1 dance entirely and is
 what we use for layout iteration. (A scratch example lived under the session scratchpad.)
 
-**Full local stack** = `worker dev` (:8787, seeded via the scheduled trigger) + `ui watch` + a static
-server for `dist/exiledata-ui/browser`. **Shim stack** = shim (:8787 → live) + `ui watch` + static server.
+**Full local stack** = `npm --prefix /c/dev/exiledata-ui run worker:dev` (:8787 — serves assets **and**
+`/api/*`, seeded via the scheduled trigger) + `ui watch` (rebuilds `dist`). **Shim stack** = shim (:8787 →
+live) + `ui watch` + a static server, when you only need the UI against live data.
 
 ---
 
 ## Cloudflare deployment
 
-Deploys are **direct from a local build** (no CI required); each repo's `npm run deploy` reads creds from
-its gitignored `.env` via `node --env-file-if-exists=.env`.
+### Consolidated deploy — one Worker (UI + API)
 
-### Worker
+The target: the existing Worker `exiledata-worker` (upgraded in place) on `exiledata.com` serving the prerendered site (`[assets]`) + the
+`/api/*` Hono app. Requires **Workers Paid** (Workflows + D1 write caps). Bindings (in
+`exiledata-ui/wrangler.toml`): D1 `exiledata` (`database_id f83a4059-3d5d-44e1-a9c3-dcf1f13b3198`), R2
+`exiledata-valuation` (`VALUATION_BUCKET`), Workflow `valuation-harvest`, `[assets]` `dist/exiledata-ui/browser`,
+Cron `0 * * * *`.
 
-```sh
-npm --prefix /c/dev/exiledata-worker run deploy     # → npx wrangler deploy
-```
-
-Registers the Worker, the `valuation-harvest` **Workflow**, and the **Cron `0 * * * *`** (hourly UTC).
-Bindings: D1 `exiledata` (`database_id f83a4059-3d5d-44e1-a9c3-dcf1f13b3198`), R2 `exiledata-valuation`
-(`VALUATION_BUCKET`), Workflow `valuation-harvest`. Requires **Workers Paid** (Workflows + D1 write caps).
-
-- **Route**: `exiledata.com/api/*` is bound **manually in the dashboard** (the token lacks
-  Zone·Workers-Routes). The `[[routes]]` block in `wrangler.toml` is commented so deploys don't touch it.
-- **Remote D1 migrations**: `npm --prefix /c/dev/exiledata-worker run db:migrate:remote`.
-- **Remote D1 one-off exec / seed** (e.g. bootstrapping `currency_snapshots` before the first cron tick):
+- **Git-based (preferred):** Cloudflare **Workers Builds** connected to `github.com/josh-dastmalchi/exiledata-ui`.
+  Build command `npm ci && npm run build`; deploy `wrangler deploy` (Workers Builds runs it). One CI run
+  prerenders (~4522 routes, ~65s) and deploys worker + assets. Enable build caching for `node_modules` +
+  `.angular/cache`. Push to `main` = deploy.
+- **Local fallback:** `npm --prefix /c/dev/exiledata-ui run deploy:app` — builds, refuses to upload if any
+  prerendered HTML contains `localhost`/`REPLACE_ME`, then `wrangler deploy`. **Stop the dev `watch`/`worker:dev`
+  first** (they write the same `dist`).
+- **DB migrations:** `npm --prefix /c/dev/exiledata-ui run db:migrate:local` (local) /
+  `db:migrate:remote` (remote). Secrets via `wrangler secret put` (never in `.env`).
+- **Remote D1 one-off exec / seed:**
   ```sh
-  node --env-file-if-exists=C:/dev/exiledata-worker/.env \
-    C:/dev/exiledata-worker/node_modules/wrangler/bin/wrangler.js \
-    d1 execute exiledata --remote --config C:/dev/exiledata-worker/wrangler.toml --file <sql>
+  node --env-file-if-exists=C:/dev/exiledata-ui/.env \
+    C:/dev/exiledata-ui/node_modules/wrangler/bin/wrangler.js \
+    d1 execute exiledata --remote --config C:/dev/exiledata-ui/wrangler.toml --file <sql>
   ```
   Chunk multi-row INSERTs (~50 rows/statement) to avoid `SQLITE_TOOBIG`.
-- **Caching**: `/api/valuation/snapshot` is an R2 artifact fronted by the edge Cache API (`Cache-Control`
-  + `ETag`, ~1h fresh). A shape/data change can take up to ~1h to propagate unless the URL is purged in the
-  dashboard (Caching → Purge → Custom URL) — our token can't purge. `/api/currency/*` are **not** cached
-  (read D1 each request).
+- **Caching**: `/api/valuation/snapshot` is an R2 artifact fronted by the edge Cache API (`Cache-Control` +
+  `ETag`, ~1h fresh); token can't purge. `/api/currency/*` are **not** cached (read D1 each request).
 
-### UI (Cloudflare Pages)
+### Cutover (Pages+split → single Worker) — last, reversible
 
-```sh
-npm --prefix /c/dev/exiledata-ui run deploy         # scripts/deploy.mjs
-```
+The split model is still live until this runs. Order:
+1. Deploy the unified worker (git or `deploy:app`); verify on its `*.workers.dev` URL (site + `/api/*`).
+2. **Retire the old `exiledata-worker`** (or at least its Workflow) — a Workflow name is account-scoped, so
+   `valuation-harvest` can't be owned by two scripts. Run remote D1 migrations against the same DB if needed.
+3. Attach `exiledata.com` as the unified worker's **custom domain**. This supersedes the Pages custom domain
+   and the hand-made `/api/*` route — remove that route. Retire the old `exiledata-ui` Pages project.
+4. **Rollback if broken:** detach the custom domain from the worker and re-point `exiledata.com` at the Pages
+   project (the old artifact is still there); re-add the `/api/*` route to the old worker.
 
-Builds into an **isolated `dist/deploy`** (so a running `watch` — dev config, localhost asset URLs — can't
-contaminate the artifact), refuses to upload if any prerendered HTML contains `localhost`/`REPLACE_ME`, then
-`wrangler pages deploy` to project **`exiledata-ui`**, production branch **`main`**. Prerenders ~4517 routes
-(~90s). **Stop the dev `watch` before deploying** (or it may race the isolated build).
+### Assets (Cloudflare Pages / static)
 
-### Assets (Cloudflare Pages)
-
-`npm --prefix /c/dev/exiledata-assets run deploy` (its own `scripts/deploy.mjs`, same `.env` pattern) →
-`assets.exiledata.com`. Serves the webp art + catalog JSON the UI references via `assetsUrl`.
+`exiledata-assets` is fully static (no build). Either keep local `npm --prefix /c/dev/exiledata-assets run
+deploy`, or connect the GitHub repo for git-based deploy (build command = `node scripts/stage-deploy.mjs`,
+output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). → `assets.exiledata.com`.
 
 ---
 
@@ -142,9 +177,14 @@ contaminate the artifact), refuses to upload if any prerendered HTML contains `l
 
 ## Gotchas checklist
 
-- ❌ `ng serve` — use `npm run watch` + static serve.
+- ❌ `ng serve` — use `npm run watch` + `npm run worker:dev`.
 - ❌ seeding local D1 with `node:sqlite` — use `wrangler d1 execute --local` or the scheduled trigger.
 - ❌ running `wrangler` from the wrong cwd / `--persist-to <abs>` — use the repo's npm scripts.
-- ⚠️ new lazy component or new dep in the UI → restart the `watch`.
+- ⚠️ **Windows drive-letter casing:** invoke `npm`/`node` with an **uppercase** drive (`C:/dev/...`). A
+  lowercase `c:/` makes `vitest` load its runner twice → every test errors `Cannot read properties of
+  undefined (reading 'config')` (vitest #5251). Same class of bug can bite other path-keyed tools.
+- ⚠️ re-extracted the catalog? run extraction's `sync:ui` and commit `exiledata-ui/data-src` (else CI builds stale data).
+- ⚠️ new lazy component or new dep in the UI → restart the `watch`/`worker:dev`.
 - ⚠️ `/api/valuation/snapshot` is edge-cached ~1h; `/api/currency/*` is not.
-- ⚠️ stop the UI `watch` before `npm run deploy` (isolated-build race).
+- ⚠️ stop the UI `watch`/`worker:dev` before `npm run deploy:app` (they share `dist`).
+- ⚠️ Workflow name `valuation-harvest` is account-scoped — retire the old standalone worker before/at cutover.
