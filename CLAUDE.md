@@ -50,21 +50,28 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
 ## Local dev & Cloudflare deploys — binding
 
 **Full stack documented in [`DEVELOPMENT.md`](DEVELOPMENT.md)** (this repo) — read it before local-dev or
-deploy work. UI → Pages (`exiledata.com`), worker → `exiledata.com/api/*`, assets → Pages
-(`assets.exiledata.com`). Each deployable repo has a gitignored `.env` (`CLOUDFLARE_API_TOKEN` +
-`CLOUDFLARE_ACCOUNT_ID`); deploy via that repo's `npm run deploy`. Non-negotiable gotchas:
+deploy work. **Consolidated model (cutover DONE 2026-07-06):** `exiledata-ui` is ONE Cloudflare Worker
+(named `exiledata-worker`) serving the prerendered Angular site (`[assets]`) + the `/api/*` Hono app (source
+in `exiledata-ui/worker/`) on `exiledata.com`; `exiledata-assets` → Pages (`assets.exiledata.com`). Each
+deployable repo has a gitignored `.env` (`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`). Non-negotiable gotchas:
 
-- **Worker local dev:** launch wrangler ONLY via `npm --prefix /c/dev/exiledata-worker run dev` /
-  `run db:migrate:local` (cwd = worker repo) — a different cwd or `--persist-to <abs>` hashes a *different*
-  local D1 file and your data looks empty.
+- **⚠️ NEVER `npm run deploy` / `wrangler deploy` the standalone `/c/dev/exiledata-worker` — it is RETIRED.**
+  It shares the worker name `exiledata-worker` but is API-ONLY (no `[assets]`), so a manual deploy CLOBBERS the
+  git-deployed consolidated worker → the WHOLE site 404s (root returns the Hono `{"error":"not_found"}`; `/api`
+  still works). This caused an outage 2026-07-06. **Worker changes go in `exiledata-ui/worker/` and ship via git push.**
+- **Deploy = `git push` to `exiledata-ui` `main`** → Cloudflare **Workers Builds** runs `npm ci && npm run build`
+  + `wrangler deploy` (prerender + upload worker & assets; ~2min). Local fallback:
+  `npm --prefix /c/dev/exiledata-ui run deploy:app` (**stop the `watch`/`worker:dev` first** — shared `dist`).
+  Assets repo: `npm --prefix /c/dev/exiledata-assets run deploy`. Remote D1:
+  `npm --prefix /c/dev/exiledata-ui run db:migrate:remote`; one-off exec via `node
+  --env-file-if-exists=C:/dev/exiledata-ui/.env C:/dev/exiledata-ui/node_modules/wrangler/bin/wrangler.js
+  d1 execute exiledata --remote --config C:/dev/exiledata-ui/wrangler.toml --file <sql>` (chunk ~50 rows/INSERT).
+- **Worker local dev:** `npm --prefix /c/dev/exiledata-ui run worker:dev` / `run db:migrate:local` (cwd =
+  exiledata-ui) — a different cwd or `--persist-to <abs>` hashes a *different* local D1 file and data looks empty.
 - **NEVER seed the local D1 with `node:sqlite`** — Node 24's SQLite bumps the file format and Miniflare
-  can't reopen it (all D1 endpoints 500). Seed via `wrangler d1 execute … --local --file`, or trigger the
-  scheduled handler: `curl -X POST http://localhost:8787/cdn-cgi/handler/scheduled`. To recover: delete
+  can't reopen it (all D1 endpoints 500). Seed via `wrangler d1 execute … --local --file`. Recover: delete
   `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite` (keep `metadata.sqlite`) + re-`db:migrate:local`.
-- **UI eval shim:** the dev config points at `localhost:8787`; a tiny Node shim there proxying `/api/*` to
-  the live worker (cache-busting `/valuation/snapshot`) is the lightest way to eval the UI on real data.
-- **Deploy:** worker `npm run deploy` (registers Workflow + Cron `0 * * * *`; route bound by hand in the
-  dashboard). UI `npm run deploy` (Pages; **stop the `watch` first**). Remote D1: `run db:migrate:remote`;
-  one-off seed via `node --env-file-if-exists=.env node_modules/wrangler/bin/wrangler.js d1 execute exiledata
-  --remote --file <sql>` (chunk ~50 rows/INSERT). `/api/valuation/snapshot` is edge-cached ~1h; token can't
-  purge. See memory `local-dev-and-deploy`.
+- **`/api/valuation/snapshot` caching:** the worker sends `max-age=0, s-maxage=300` (browsers revalidate cheaply;
+  edge holds 5 min) — a zone **Cache Rule scoped to `/api` = "Respect origin"** stops CF's default 4h Browser
+  Cache TTL from overriding it on cached hits. Token can't purge cache or manage routes/rules (dashboard only).
+  See memory `local-dev-and-deploy`.

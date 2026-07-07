@@ -7,15 +7,18 @@ The full dev/deploy stack for the **exiledata** multi-repo system. Siblings unde
 | `exiledata-ui` | Angular 22 app (SSG/prerender) **+ the merged `worker/` API** (Hono + D1 + R2 + Workflows + Cron) | Cloudflare **Worker w/ static assets** | `exiledata.com` (+ `/api/*`) |
 | `exiledata-assets` | Static art/data (webp icons, UI art, catalog JSON) | Cloudflare **Pages** (→ static-assets) | `assets.exiledata.com` |
 | `exiledata-extraction` | PoE2 dat/asset extraction tooling (offline; not deployed) | — | — |
-| `exiledata-worker` | **Legacy standalone worker — being retired.** Its source now lives in `exiledata-ui/worker/`. | (until cutover) | `exiledata.com/api/*` |
+| `exiledata-worker` | **RETIRED standalone worker — do NOT deploy** (shares the name; clobbers the consolidated worker). Source now lives in `exiledata-ui/worker/`. | — | — |
 
 **Architecture (2026-07 consolidation).** We moved off the old split model (UI on Pages + a separate
 Worker bolted on at `/api/*` via a hand-made dashboard route) to Cloudflare's recommended **single Worker
 with attached static assets**: one Worker owns `exiledata.com`, serving the prerendered site from its
 `[assets]` binding and the `/api/*` Hono app from code. The worker source was merged into
 `exiledata-ui/worker/`; the UI repo is now **self-contained** (its catalog inputs are vendored, so it
-builds in single-repo CI). See **Consolidated deploy** below. The split model still runs live until the
-domain **cutover** (last step) is done.
+builds in single-repo CI). See **Consolidated deploy** below. **The cutover is DONE (2026-07-06):** `exiledata.com` is served
+entirely by the consolidated Worker (Workers Builds on `exiledata-ui`); the old split model (Pages +
+standalone `/api/*` worker) is retired. ⚠️ The standalone `exiledata-worker` repo must NEVER be
+`npm run deploy`'d — it shares the worker name but has no `[assets]`, so a manual deploy clobbers the
+consolidated worker and 404s the whole site (see Gotchas).
 
 **Prereqs:** system Node is v24 — run `node`/`npm`/`npx` **bare** (never a PATH prefix). Each deployable
 repo has a **gitignored `.env`** with `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` (copy from
@@ -147,9 +150,10 @@ Cron `0 * * * *`.
 - **Caching**: `/api/valuation/snapshot` is an R2 artifact fronted by the edge Cache API (`Cache-Control` +
   `ETag`, ~1h fresh); token can't purge. `/api/currency/*` are **not** cached (read D1 each request).
 
-### Cutover (Pages+split → single Worker) — last, reversible
+### Cutover (Pages+split → single Worker) — DONE 2026-07-06 (recorded for history / rollback)
 
-The split model is still live until this runs. Order:
+Completed: `exiledata.com` now resolves to the consolidated Worker (assets + `/api/*`), deployed by
+Workers Builds on push to `exiledata-ui` `main`. Kept below as the record + the rollback path. Order was:
 1. Deploy the unified worker (git or `deploy:app`); verify on its `*.workers.dev` URL (site + `/api/*`).
 2. **Retire the old `exiledata-worker`** (or at least its Workflow) — a Workflow name is account-scoped, so
    `valuation-harvest` can't be owned by two scripts. Run remote D1 migrations against the same DB if needed.
@@ -185,6 +189,12 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
   undefined (reading 'config')` (vitest #5251). Same class of bug can bite other path-keyed tools.
 - ⚠️ re-extracted the catalog? run extraction's `sync:ui` and commit `exiledata-ui/data-src` (else CI builds stale data).
 - ⚠️ new lazy component or new dep in the UI → restart the `watch`/`worker:dev`.
-- ⚠️ `/api/valuation/snapshot` is edge-cached ~1h; `/api/currency/*` is not.
+- ❌ **NEVER `npm run deploy` / `wrangler deploy` the standalone `/c/dev/exiledata-worker`** — it's RETIRED and
+  shares the worker name `exiledata-worker` but has no `[assets]`, so a manual deploy CLOBBERS the git-deployed
+  consolidated worker → the whole site 404s (root → Hono `{"error":"not_found"}`; `/api` still works). Caused an
+  outage 2026-07-06. Recover by pushing `exiledata-ui` (Workers Build redeploys the consolidated worker, ~2min).
+  Worker changes go in `exiledata-ui/worker/` + git push.
+- ⚠️ `/api/valuation/snapshot`: worker sends `max-age=0, s-maxage=300` (browsers revalidate; edge 5min); a zone
+  **Cache Rule scoped to `/api` = "Respect origin"** stops CF's default 4h Browser Cache TTL from overriding it.
+  `/api/currency/*` is not cached. Token can't purge cache or manage routes/rules (dashboard only).
 - ⚠️ stop the UI `watch`/`worker:dev` before `npm run deploy:app` (they share `dist`).
-- ⚠️ Workflow name `valuation-harvest` is account-scoped — retire the old standalone worker before/at cutover.
