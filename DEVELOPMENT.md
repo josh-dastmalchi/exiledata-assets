@@ -76,22 +76,26 @@ npm --prefix /c/dev/exiledata-ui run watch     # ng build --watch --configuratio
   resolution and won't pick up brand-new files.
 - Verify a real build: `npm --prefix /c/dev/exiledata-ui run build` (prerenders ~4500 routes).
 
-### exiledata-worker (Cloudflare Worker)
+### exiledata-ui worker (`/api/*` — Cloudflare Worker)
+
+The `/api/*` Hono app lives in `exiledata-ui/worker/` (the standalone `exiledata-worker` repo is retired).
+`worker:dev` runs `wrangler dev`, which serves the built assets **and** `/api/*` from one origin, so hit the
+site on **:8787** for `/api` to resolve same-origin.
 
 ```sh
-npm --prefix /c/dev/exiledata-worker run db:migrate:local    # apply schema to the LOCAL D1
-npm --prefix /c/dev/exiledata-worker run dev                 # wrangler dev → http://localhost:8787
+npm --prefix /c/dev/exiledata-ui run db:migrate:local    # apply schema to the LOCAL D1
+npm --prefix /c/dev/exiledata-ui run worker:dev          # wrangler dev → http://localhost:8787 (assets + /api)
 ```
 
-- **Always run wrangler via the repo's npm scripts** (`npm --prefix /c/dev/exiledata-worker run …`) so its
-  working dir is the worker repo and Miniflare uses `exiledata-worker/.wrangler/state`. Running `wrangler`
+- **Always run wrangler via the repo's npm scripts** (`npm --prefix /c/dev/exiledata-ui run …`) so its
+  working dir is `exiledata-ui` and Miniflare uses `exiledata-ui/.wrangler/state`. Running `wrangler`
   from another cwd, or passing `--persist-to <absolute-path>`, makes Miniflare hash a **different** local D1
   file — so the DB you migrated/seeded is invisible and every query looks empty. `db:migrate:local` and
-  `dev` must be launched the same way to share one D1 file.
+  `worker:dev` must be launched the same way to share one D1 file.
 - **Trigger the Cron/scheduled handler locally** (runs the valuation harvest + the poe2scout
   currency-exchange ingest, writing D1 through the worker's own binding — the compatible way):
   ```sh
-  # with `npm run dev` running:
+  # with `worker:dev` running:
   curl -X POST http://localhost:8787/cdn-cgi/handler/scheduled
   ```
   The valuation harvest is gated to ~6h; to force it, clear the cursor:
@@ -100,7 +104,7 @@ npm --prefix /c/dev/exiledata-worker run dev                 # wrangler dev → 
   `--command`). **Never write the local D1 sqlite with Node's `node:sqlite`** — Node 24's newer SQLite bumps
   the file format and Miniflare/wrangler can no longer open it (every D1 endpoint then returns 500, including
   ones you didn't touch). If that happens: delete
-  `exiledata-worker/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite` (keep `metadata.sqlite`) and
+  `exiledata-ui/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite` (keep `metadata.sqlite`) and
   re-run `db:migrate:local`.
 - No GGG token is needed for the valuation + currency-exchange features. The GGG OAuth / cxapi-poller /
   per-user features stay dormant behind `isConfigured()` until the four secrets exist (`.dev.vars` locally).
