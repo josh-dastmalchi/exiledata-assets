@@ -100,6 +100,16 @@ npm --prefix /c/dev/exiledata-ui run worker:dev          # wrangler dev → http
   ```
   The valuation harvest is gated to ~6h; to force it, clear the cursor:
   `wrangler d1 execute exiledata --local --command "DELETE FROM poller_state WHERE id='poe2scout';"`
+- **Restore real valuations into local D1 WITHOUT running the poller** (preferred for `/valuation` +
+  `/filter` dev): `npm --prefix /c/dev/exiledata-ui run restore:valuations`. It pulls the small
+  valuation tables (`valuations`/`valuation_meta`/`poller_state`, ~1.1k rows) via **plain
+  `d1 execute --remote SELECT`s** — ordinary reads, so prod stays fully available (deliberately NOT
+  `d1 export`, which takes a snapshot lock and briefly makes the prod DB unavailable) — turns the rows
+  into `INSERT OR REPLACE` and applies them to local via `d1 execute --local --file`. Run
+  `db:migrate:local` first if the local schema is empty. It imports `poller_state` too, so the local
+  scheduled harvest stays gated and never re-runs the poller. The full DB
+  (currency_snapshots/price_daily, ~300k rows) is left out; add tables to `TABLES` in
+  `worker/scripts/restore-valuations.mjs` if you need `/currency/*` (at that size prefer `d1 export`).
 - **Seed the local D1 manually** only with `wrangler d1 execute exiledata --local --file <sql>` (or
   `--command`). **Never write the local D1 sqlite with Node's `node:sqlite`** — Node 24's newer SQLite bumps
   the file format and Miniflare/wrangler can no longer open it (every D1 endpoint then returns 500, including
