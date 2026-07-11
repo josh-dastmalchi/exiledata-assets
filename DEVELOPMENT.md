@@ -52,21 +52,39 @@ directly in production for speed; the code delegation is the correctness net whe
 
 ### exiledata-ui (Angular)
 
-**Never `ng serve`.** It runs dev-mode client rendering and skips the static prerender (`outputMode:
-static`), hiding the SSG / hydration / TransferState bugs that only appear in a real build. Use a watched
-production-shaped build and serve its output:
+**Two modes — don't conflate them.** (An earlier version of this doc said "never `ng serve`"; that was
+wrong. `ng serve` runs dev-mode **SSR + hydration + HMR** here, because `ssr.entry: src/server.ts` is
+configured — it renders through the same `server.ts` as the prod prerender. Verified: it returns fully
+rendered HTML, not an empty `<app-root>` shell.)
+
+*Mode 1 — iterate (default, 95% of the time):*
 
 ```sh
-npm --prefix /c/dev/exiledata-ui run watch     # ng build --watch --configuration development
-                                                # → dist/exiledata-ui/browser  (rebuilds on save)
+npm --prefix /c/dev/exiledata-ui run start     # ng serve → http://localhost:4200 (dev-SSR + HMR)
 ```
 
-- **Serve the output.** The lightest way that mirrors production is `npm --prefix /c/dev/exiledata-ui run
-  worker:dev` (`wrangler dev`) — it serves the built assets **and** the `/api/*` worker from one origin
-  (`:8787`), applying `_headers`/`_redirects` (so the `/valuation` CSR-shell rewrite works). Run it
-  alongside `watch`. (Any static server with an SPA/CSR fallback also works: client-rendered routes
-  `/valuation`, `/valuation/:category` have **no** prerendered `index.html` and must fall back to
-  `browser/index.csr.html`; the `_redirects` rule handles this.)
+Fast, no wrangler, no manifest, no zombies. Binds **IPv6** — browse `localhost:4200`, not `127.0.0.1`.
+Art comes from the assets dev server: run `npm --prefix /c/dev/exiledata-assets start` (`:4201`, matches
+`environment.development.ts`). `/api` isn't served in this mode (dev config points it at `:8787`).
+
+*Mode 2 — verify the deploy shape (before committing/pushing, or when touching `/api` or headers):*
+
+```sh
+npm --prefix /c/dev/exiledata-ui run build     # ng build → dist/exiledata-ui/browser (prerenders ~4500 routes)
+npm --prefix /c/dev/exiledata-ui run worker:dev  # wrangler dev → serves the build + /api/* on :8787
+```
+
+`worker:dev` mirrors production: static assets **and** the `/api/*` worker from one origin, applying
+`_headers`/`_redirects` (so the `/valuation` CSR-shell rewrite works; those CSR routes fall back to
+`browser/index.csr.html`). This catches the things `ng serve` can't: build-time prerender *failures*,
+the CF serving layer, and `/api`.
+
+> ⚠️ **Never run `wrangler dev` / `watch` as the edit loop.** wrangler snapshots its asset manifest at
+> **startup** and does not re-index — so `watch`'s changing chunk hashes 404 (`ChunkLoadError`). Worse,
+> wrangler (`workerd`) and vite leave **zombie child processes** holding their ports after you stop the
+> parent, including on **IPv6** (`[::1]:4200`, `[::1]:8787`) which `netstat -ano -p tcp` does **not**
+> show. Before restarting a server, reap stragglers: `netstat -ano | findstr :4200` (plain, both
+> stacks) → `taskkill /F /PID <pid>`. This one gotcha caused most of our "local hosting is broken" time.
 - **Catalog inputs are vendored** in `data-src/` (committed). copy-catalog reads them at build (was the
   sibling extraction repo). After re-extracting, refresh with `npm --prefix /c/dev/exiledata-extraction/dat-export
   run sync:ui` and commit `exiledata-ui/data-src`. (Override the source path with `CATALOG_SRC` if needed.)
@@ -129,9 +147,10 @@ TS (Node 24 strips types — `await import(pathToFileURL('…/src/exchange.ts').
 `/valuation/snapshot` (`?bust=<ts>`) to dodge the edge cache. This avoids the local-D1 dance entirely and is
 what we use for layout iteration. (A scratch example lived under the session scratchpad.)
 
-**Full local stack** = `npm --prefix /c/dev/exiledata-ui run worker:dev` (:8787 — serves assets **and**
-`/api/*`, seeded via the scheduled trigger) + `ui watch` (rebuilds `dist`). **Shim stack** = shim (:8787 →
-live) + `ui watch` + a static server, when you only need the UI against live data.
+**Full local stack** = `npm --prefix /c/dev/exiledata-ui run start` (`ng serve`, :4200 — the UI) +
+`npm --prefix /c/dev/exiledata-ui run worker:dev` (:8787 — real `/api/*`, seeded via the scheduled
+trigger). **Shim stack** = `ng serve` (:4200) + a shim (:8787 → live), when you only need the UI against
+live `/api` data. Both rely on `environment.development.ts` pointing `apiUrl` at `:8787`.
 
 ---
 
@@ -195,14 +214,18 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
 
 ## Gotchas checklist
 
-- ❌ `ng serve` — use `npm run watch` + `npm run worker:dev`.
+- ✅ `ng serve` (`npm run start`, :4200) IS the iteration loop (dev-SSR + HMR). ❌ don't use `wrangler
+  dev`/`watch` as the edit loop — stale asset manifest → `ChunkLoadError`, plus zombie ports. Reserve
+  `build` + `worker:dev` for deploy-shape verification.
 - ❌ seeding local D1 with `node:sqlite` — use `wrangler d1 execute --local` or the scheduled trigger.
 - ❌ running `wrangler` from the wrong cwd / `--persist-to <abs>` — use the repo's npm scripts.
 - ⚠️ **Windows drive-letter casing:** invoke `npm`/`node` with an **uppercase** drive (`C:/dev/...`). A
   lowercase `c:/` makes `vitest` load its runner twice → every test errors `Cannot read properties of
   undefined (reading 'config')` (vitest #5251). Same class of bug can bite other path-keyed tools.
 - ⚠️ re-extracted the catalog? run extraction's `sync:ui` and commit `exiledata-ui/data-src` (else CI builds stale data).
-- ⚠️ new lazy component or new dep in the UI → restart the `watch`/`worker:dev`.
+- ⚠️ installed a new dep? restart `ng serve` (esbuild caches module resolution). Stopping any dev
+  server? reap zombie children on its port — incl. IPv6 `[::1]` — with plain `netstat -ano` (not `-p
+  tcp`) → `taskkill /F /PID` before restarting.
 - ❌ **NEVER `npm run deploy` / `wrangler deploy` the standalone `/c/dev/exiledata-worker`** — it's RETIRED and
   shares the worker name `exiledata-worker` but has no `[assets]`, so a manual deploy CLOBBERS the git-deployed
   consolidated worker → the whole site 404s (root → Hono `{"error":"not_found"}`; `/api` still works). Caused an
