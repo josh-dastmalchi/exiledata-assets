@@ -29,11 +29,18 @@ const OUT = join(root, 'skilltree')
 // Atlas sheets the base render needs. `strip` drops the `<sheet>:` prefix (structural sheets whose
 // prefix is not part of the key the renderer asks for). Centre-hub art (background-*, group-
 // background) is intentionally omitted — the renderer falls back to a vector hub without it.
+// Playable classes that have a background-<class>.webp (portrait + ascendancy discs).
+const CLASSES = ['druid', 'huntress', 'mercenary', 'monk', 'ranger', 'sorceress', 'warrior', 'witch']
 const SHEETS = [
   { file: 'skills', strip: false }, // node icons; keys already `<variant>Active:<icon>`
   { file: 'mastery-effect-active', strip: false }, // notable/mastery background patterns
   { file: 'frame', strip: true }, // node overlay frames
   { file: 'line', strip: true }, // straight + orbit-arc connectors
+  // Centre-hub art: the two concentric rings (startNode:MainCircle[Active]) + each class's portrait
+  // (classNAME:Class0) and ascendancy discs (classNAME:Class1..N). Keys kept whole (the renderer asks
+  // for them literally). background-<class> bitmaps are large + loaded on demand per selected class.
+  { file: 'group-background', strip: false },
+  ...CLASSES.map((c) => ({ file: `background-${c}`, strip: false })),
 ]
 
 mkdirSync(OUT, { recursive: true })
