@@ -22,9 +22,23 @@ The Bash allowlist matches on the command's **leading token**. `git`, `npm`, `np
    `npm --prefix /c/dev/exiledata-ui run build`, `git -C /c/dev/exiledata-ui status`. The leading
    token stays `node`/`npm`/`git`, so it hits the allowlist regardless of cwd.
 4. System `node` is already v24 — run `node`/`npm` **bare**, never with a PATH prefix or `export`.
+5. **Background tasks & the `Monitor` tool run through this SAME allowlist.** A `tail -f … | grep …`
+   watcher is a *compound* command (leading token `tail` + a pipe) → it prompts, and **no allowlist
+   entry can fix a pipe**, so mechanical allowlisting won't help. Two rules:
+   (a) **Don't spin up a watcher to "verify" a low-risk edit.** A Tailwind class, a CSS-token change,
+   an HTML-only/template edit, or a docs edit **cannot break compilation** — and `ng serve` HMR
+   already recompiles on save. There is nothing to watch; just make the edit and move on.
+   (b) **When you genuinely must watch a long, failure-prone run** (a real build, a deploy), write
+   the watcher as a **single `node` command** (`node -e "…"` that reads/polls the log — leading
+   token `node`, no pipe → allowlisted), never `tail`/`grep`.
+6. **The rule of thumb:** if a "quick check" would run a non-allowlisted or compound command, it is
+   not worth the prompt — reach for a dedicated tool (Read/Glob/Grep), express it as one `node`
+   command, or skip the check. A prompt is never the cost of doing business; it's a signal the
+   command was shaped wrong.
 
-If a one-off needs a non-allowlisted tool, accept the single prompt — do **not** wrap it in `cd …
-&&` hoping to batch it; that just guarantees the prompt.
+If a one-off *genuinely* needs a non-allowlisted tool (e.g. a real download/extract that only a shell
+utility does), accept the single prompt — but do **not** wrap it in `cd … &&` hoping to batch it, and
+do **not** substitute a needless prompt for a dedicated tool that would do the same job silently.
 
 See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
 
