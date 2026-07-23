@@ -52,6 +52,18 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   e.g. videos live at `Art/Videos/...`), **alternate texture/asset paths**, and **all `ModDomains`**
   (map=6, jewel=11, tincture=34, desecrated=28). The user is the domain expert; if they say it
   exists, it exists — keep looking. See memory `dont-declare-data-absent`.
+- **I MANAGE THE DEV SERVERS — never punt this to the user (binding).** Whenever a change needs the
+  app running (viewing a page, reproducing a reported error, verifying a fix), I start/restart the
+  servers **myself**, in the background: kill any stale listener on the port first (`ng serve` binds
+  IPv6 `[::1]:4200`, invisible to `netstat -ano -p tcp` — find the PID with PowerShell
+  `Get-NetTCPConnection -State Listen -LocalPort 4200,8787` or plain `netstat -ano`, then
+  `taskkill /PID <pid> /T /F` to take the whole tree), then `npm --prefix /c/dev/exiledata-ui run start`
+  (and `run worker:dev` when `/api` is involved, e.g. homepage feeds → the `/api/patch` + `/api/news`
+  CORS failures). **Editing the root routes array (`app.routes.ts`) or any bootstrap config requires a
+  FULL `ng serve` restart** — `provideRouter(routes)` captures the array at bootstrap, so a live HMR
+  reload does NOT register a new route (symptom: `NG04002 Cannot match any routes. URL Segment: '…'`
+  for a route that nonetheless prerenders fine in a real build). NEVER tell the user to start, restart,
+  or curl a dev server — that is my job.
 - **Dev server: `ng serve` for iteration; a real build only to verify.** (This reverses an old
   "NEVER ng serve" rule that was based on a false premise — see memory `exiledata-ui-dev-server`.)
   `ng serve` (`npm --prefix /c/dev/exiledata-ui run start` → http://localhost:4200) **does** run
