@@ -61,8 +61,31 @@ for (const sheet of SHEETS) {
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ frames }))
 cpSync(join(EXPORT, 'data.json'), join(OUT, 'tree-data.json'))
 
+// Ascendancy-only slice of the raw export, for the read-only /classes disc views (exiledata-ui's
+// TreeSceneService). Those views render ONE ascendancy disc at a time and never touch the ~4900
+// main-tree nodes, yet loaded the whole ~5MB export. Keep every ascendancy node + the groups they sit
+// in; leave everything else intact (edges table, classes, skillOverrides, bounds) so tree-core's
+// normalizeGggTree + buildScene compute IDENTICAL ascendancy geometry — verified byte-identical across
+// all ascendancies (nodes, connections, disc worldAnchor/size). ~5.1MB -> ~0.6MB. The full tree-data.json
+// stays for the /passives/tree planner (which keeps its own loader).
+const raw = JSON.parse(readFileSync(join(EXPORT, 'data.json'), 'utf8'))
+const ascNodes = Object.entries(raw.nodes).filter(([, n]) => n.ascendancyId)
+const ascGroups = new Set(ascNodes.map(([, n]) => n.group).filter((g) => g != null))
+const ascSkills = new Set(ascNodes.map(([, n]) => Number(n.skill)))
+const ascOnly = {
+  ...raw,
+  nodes: Object.fromEntries(ascNodes),
+  groups: Object.fromEntries(Object.entries(raw.groups).filter(([g]) => ascGroups.has(Number(g)))),
+  // Intra-ascendancy edges only (both endpoints kept). normalize keys arc geometry by the (from,to)
+  // node pair, not the array index, so reindexing the filtered array is safe.
+  edges: raw.edges.filter((e) => ascSkills.has(Number(e.from)) && ascSkills.has(Number(e.to))),
+  jewelSlots: [], // all jewel sockets are main-tree; ascendancies have none
+}
+writeFileSync(join(OUT, 'ascendancy-tree-data.json'), JSON.stringify(ascOnly))
+
 const kb = (p) => `${(statSync(p).size / 1024).toFixed(0)} KB`
 console.log(`vendor-skilltree -> ${OUT}`)
 console.log(`  manifest.json: ${Object.keys(frames).length} sprite keys${dup ? ` (${dup} dup keys across sheets)` : ''}, ${kb(join(OUT, 'manifest.json'))}`)
 for (const s of SHEETS) console.log(`  ${s.file}.webp: ${kb(join(OUT, `${s.file}.webp`))}`)
 console.log(`  tree-data.json: ${kb(join(OUT, 'tree-data.json'))}`)
+console.log(`  ascendancy-tree-data.json: ${kb(join(OUT, 'ascendancy-tree-data.json'))} (${ascNodes.length} asc nodes)`)
