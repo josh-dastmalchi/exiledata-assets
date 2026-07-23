@@ -59,7 +59,10 @@ for (const sheet of SHEETS) {
 }
 
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ frames }))
-cpSync(join(EXPORT, 'data.json'), join(OUT, 'tree-data.json'))
+// GGG's data.json is pretty-printed (~5.1 MB). Reparse + write it minified (~2.3 MB). Brotli makes
+// the on-the-wire cost nearly identical, but minifying halves the transient decompressed text buffer
+// the browser holds before parse and shaves parse time — free, since the browser normalizes it anyway.
+writeFileSync(join(OUT, 'tree-data.json'), JSON.stringify(JSON.parse(readFileSync(join(EXPORT, 'data.json'), 'utf8'))))
 
 // Ascendancy-only slice of the raw export, for the read-only /classes disc views (exiledata-ui's
 // TreeSceneService). Those views render ONE ascendancy disc at a time and never touch the ~4900
