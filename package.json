@@ -2,9 +2,9 @@
   "name": "exiledata-assets",
   "version": "0.5.3",
   "private": true,
-  "description": "Static CDN of PoE2 item art (.webp) + skill videos (.webm). `npm start` serves the tree locally over HTTP on :4201 via wrangler, honoring _headers so local dev mirrors the deployed Cloudflare Pages site.",
+  "description": "Static CDN of PoE2 item art (.webp) + skill videos (.webm). `npm start` serves the tree locally over HTTP on :4201 via wrangler, honoring _headers so local dev mirrors the deployed Cloudflare Pages site. NOTE the PINNED --compatibility-date: with no date wrangler defaults to TODAY, and the bundled workerd only supports dates up to its own build, so `start` breaks the moment the calendar passes it (it did on 2026-07-30: 'requires compatibility date 2026-07-30, but the newest date supported by this server binary is 2026-07-29'). The exact value is irrelevant here — this project has no Functions — it only has to be fixed rather than floating.",
   "scripts": {
-    "start": "npx -y wrangler pages dev . --port 4201",
+    "start": "npx -y wrangler pages dev . --port 4201 --compatibility-date=2026-07-01",
     "stage": "node scripts/stage-deploy.mjs",
     "deploy": "node --env-file-if-exists=.env scripts/deploy.mjs"
   }
