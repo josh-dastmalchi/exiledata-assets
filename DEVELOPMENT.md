@@ -70,7 +70,7 @@ Art comes from the assets dev server: run `npm --prefix /c/dev/exiledata-assets 
 *Mode 2 — verify the deploy shape (before committing/pushing, or when touching `/api` or headers):*
 
 ```sh
-npm --prefix /c/dev/exiledata-ui run build     # ng build → dist/exiledata-ui/browser (prerenders ~4500 routes)
+npm --prefix /c/dev/exiledata-ui run build     # ng build → dist/exiledata-ui/browser (prerenders ~6200 routes)
 npm --prefix /c/dev/exiledata-ui run worker:dev  # wrangler dev → serves the build + /api/* on :8787
 ```
 
@@ -92,7 +92,10 @@ the CF serving layer, and `/api`.
   `environment.ts` → `/api` (same-origin). So the watched build expects the worker (or a shim) on **:8787**.
 - **Restart the watch after adding a new lazy-loaded component or installing a dep** — esbuild caches module
   resolution and won't pick up brand-new files.
-- Verify a real build: `npm --prefix /c/dev/exiledata-ui run build` (prerenders ~4500 routes).
+- Verify a real build: `npm --prefix /c/dev/exiledata-ui run build` (prerenders ~6200 routes). Its
+  `postbuild` also runs `scripts/verify-build.mjs`, which **fails the build** if any prerendered page
+  contains `localhost`/`REPLACE_ME` — i.e. a dev-config or mixed artifact. That guard used to live only
+  in `deploy-app.mjs` (the local fallback deploy), so the git path that actually ships skipped it.
 
 ### exiledata-ui worker (`/api/*` — Cloudflare Worker)
 
@@ -166,8 +169,12 @@ Cron `0 * * * *`.
 
 - **Git-based (preferred):** Cloudflare **Workers Builds** connected to `github.com/josh-dastmalchi/exiledata-ui`.
   Build command `npm ci && npm run build`; deploy `wrangler deploy` (Workers Builds runs it). One CI run
-  prerenders (~4522 routes, ~65s) and deploys worker + assets. Enable build caching for `node_modules` +
+  prerenders (~6200 routes, ~60s) and deploys worker + assets. Enable build caching for `node_modules` +
   `.angular/cache`. Push to `main` = deploy.
+  ⚠️ **That build command is the ONLY thing this deploy runs — no lint, no typecheck, no tests.** In
+  particular `wrangler deploy` bundles the worker with esbuild, which strips types **without checking**,
+  so a worker type error ships. `npm run typecheck:worker` is not optional. The `.husky/pre-push` hook
+  runs `npm run check` (format + typecheck:worker + lint + all 98 tests, ~35s) as the stand-in for CI.
 - **Local fallback:** `npm --prefix /c/dev/exiledata-ui run deploy:app` — builds, refuses to upload if any
   prerendered HTML contains `localhost`/`REPLACE_ME`, then `wrangler deploy`. **Stop the dev `watch`/`worker:dev`
   first** (they write the same `dist`).
@@ -180,8 +187,11 @@ Cron `0 * * * *`.
     d1 execute exiledata --remote --config C:/dev/exiledata-ui/wrangler.toml --file <sql>
   ```
   Chunk multi-row INSERTs (~50 rows/statement) to avoid `SQLITE_TOOBIG`.
-- **Caching**: `/api/valuation/snapshot` is an R2 artifact fronted by the edge Cache API (`Cache-Control` +
-  `ETag`, ~1h fresh); token can't purge. `/api/currency/*` are **not** cached (read D1 each request).
+- **Caching**: `/api/valuation/snapshot` is an R2 artifact fronted by the edge Cache API. Verified from
+  the live response 2026-07-31: `public, max-age=0, s-maxage=300, stale-while-revalidate=21600` + an
+  `ETag` — i.e. browsers always revalidate (cheaply, via the ETag), the **edge holds it 5 min**, and it
+  may serve stale for up to 6h while refreshing. (This doc previously said "~1h fresh", which was wrong
+  in both directions.) Token can't purge. `/api/currency/*` are **not** cached (read D1 each request).
 
 ### Cutover (Pages+split → single Worker) — DONE 2026-07-06 (recorded for history / rollback)
 
@@ -208,9 +218,13 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
 - **Valuation** (auth-free): poe2scout `ByCategory` → `item_prices`/`valuations`/`price_daily` in D1;
   `finalize` publishes `valuation/<realm>/latest.json` to R2 → `GET /api/valuation/snapshot`. UI: `/valuation`.
 - **Currency arbitrage** (auth-free): poe2scout `SnapshotPairs` → `currency_snapshots` (hourly, ungated
-  ingest in `scheduled()`); `computeBackboneArbitrage` → `GET /api/currency/arbitrage`. UI: the
-  arbitrage panel on the `/valuation` landing. Backbone-only by design — the full currency graph is too
-  noisy to price. See the worker README and the plan for the why.
+  ingest in `scheduled()`) → **`GET /api/currency/flips`** (and `/api/currency/pairs`). UI: the arbitrage
+  panel on the `/valuation` landing. Backbone-only by design — the full currency graph is too noisy to
+  price. See the worker README and the plan for the why.
+  ⚠️ This doc used to say `GET /api/currency/arbitrage`; **there is no such route.** It fell through to
+  `/currency/:currency` and answered `404 {"error":"currency_not_found","currency":"arbitrage"}` — a
+  wrong path that looks like a missing-data bug rather than a bad URL. The real routes are
+  `/currency/pairs`, `/currency/flips`, `/currency/:currency`, `/currency/:currency/history`.
 
 ## Gotchas checklist
 
