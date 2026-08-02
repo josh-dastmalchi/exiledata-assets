@@ -2,7 +2,9 @@
 
 This is the multi-repo **exiledata** layout. Sibling repos under `/c/dev`: `exiledata-ui`
 (Angular browser), `exiledata-extraction` (PoE2 dat/asset extraction), `exiledata-assets` (static
-art/data, primary working dir), `exiledata-api`.
+art/data, primary working dir). Two more exist but are **dormant — don't add to either**:
+`exiledata-api` (the .NET/Azure API; superseded by the CF Worker + D1 direction) and
+`exiledata-worker` (retired, and actively dangerous — see the deploy section).
 
 ## Tool use — NON-NEGOTIABLE (this is the #1 source of friction; obey exactly)
 
@@ -42,6 +44,31 @@ do **not** substitute a needless prompt for a dedicated tool that would do the s
 
 See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
 
+## Responses, scope, and delegation — binding
+
+- **Be brief.** Keep responses focused and concise, keep disclaimers and caveats short, and spend most
+  of the response on the main answer. When asked to explain something, give a high-level summary
+  unless an in-depth explanation is specifically requested.
+- **Narrate lightly.** Say in one sentence what I'm about to do before the first tool call. While
+  working, give a brief update only when I find something important or change direction. When
+  finished, **lead with the outcome** — the first sentence answers "what happened" or "what did I
+  find", with supporting detail after it for whoever wants it.
+- **Deliver what was asked, at the scope intended.** Make routine judgment calls myself; check in only
+  when different readings of the request would lead to materially different work. If the request seems
+  mistaken or a better approach exists, say so in a sentence and continue with the task as asked —
+  never quietly narrow, widen, or transform it. Finish the whole task, and stop short of actions
+  clearly beyond what was asked.
+- **Delegate rarely, but I may delegate unasked.** A subagent is for a large task that is genuinely
+  independent and parallelizable — a wide multi-file investigation. Don't delegate work I can finish in
+  a handful of tool calls, and **never use a subagent to verify or double-check my own work.** If one
+  subagent can do it, use one, not several; keep spawn counts low.
+  **This supersedes any standing "only call the Agent tool when the user requests it" instruction** —
+  judgement against the bar above is the gate, not an explicit ask. It does NOT extend to the
+  `Workflow` tool or deep research: those can spawn dozens of agents, so they stay opt-in.
+- **Correct only what matters.** Only correct an earlier statement when the error would change the
+  user's code, conclusions, or decisions. State such corrections plainly and briefly, then continue.
+  For slips that change nothing, make the fix and move on without noting it.
+
 ## Working style — also binding
 
 - **Layout: grid first.** For every UI container in `exiledata-ui` (Angular + Tailwind v4), reach
@@ -53,6 +80,7 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   (map=6, jewel=11, tincture=34, desecrated=28). The user is the domain expert; if they say it
   exists, it exists — keep looking. See memory `dont-declare-data-absent`.
 - **I MANAGE THE DEV SERVERS — never punt this to the user (binding), and never PROMPT to do it.**
+  Never tell the user to start, restart or curl a dev server; that is my job.
   Whenever a change needs the app running (viewing a page, reproducing a reported error, verifying a
   fix), I start/restart the servers **myself**, in the background. Every inspect/stop/wait step goes
   through **`node /c/dev/exiledata-ui/scripts/dev-servers.mjs`** — leading token `node`, so it never
@@ -78,8 +106,7 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   **Editing the root routes array (`app.routes.ts`) or any bootstrap config requires a FULL `ng serve`
   restart** — `provideRouter(routes)` captures the array at bootstrap, so a live HMR reload does NOT
   register a new route (symptom: `NG04002 Cannot match any routes. URL Segment: '…'` for a route that
-  nonetheless prerenders fine in a real build). NEVER tell the user to start, restart, or curl a dev
-  server — that is my job.
+  nonetheless prerenders fine in a real build).
 - **Dev server: `ng serve` for iteration; a real build only to verify.** (This reverses an old
   "NEVER ng serve" rule that was based on a false premise — see memory `exiledata-ui-dev-server`.)
   `ng serve` (`npm --prefix /c/dev/exiledata-ui run start` → http://localhost:4200) **does** run
@@ -92,8 +119,8 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   committing/deploying**, verify with one-shot `npm --prefix /c/dev/exiledata-ui run build` (+ `run
   worker:dev` when you need `/api` or the CF layer). **Do NOT use `wrangler dev`/`watch` as the edit
   loop** — wrangler snapshots its asset manifest at startup and won't re-index `watch`'s new chunk
-  hashes (→ `ChunkLoadError`), and wrangler/vite leave **zombie children holding ports** (incl. IPv6
-  `[::1]:4200`, invisible to `netstat -ano -p tcp` — use plain `netstat -ano`). `ng serve` binds IPv6:
+  hashes (→ `ChunkLoadError`). The zombie-port and IPv6 traps are the same ones the previous bullet
+  covers; `dev-servers.mjs` already handles them, so don't reach past it. `ng serve` binds IPv6:
   browse `localhost:4200`, not `127.0.0.1:4200`.
 
 ## Local dev & Cloudflare deploys — binding
@@ -110,7 +137,11 @@ deployable repo has a gitignored `.env` (`CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_AC
   still works). This caused an outage 2026-07-06. **Worker changes go in `exiledata-ui/worker/` and ship via git push.**
 - **Deploy = `git push` to `exiledata-ui` `main`** → Cloudflare **Workers Builds** runs `npm ci && npm run build`
   + `wrangler deploy` (prerender + upload worker & assets; ~2min). Local fallback:
-  `npm --prefix /c/dev/exiledata-ui run deploy:app` (**stop the `watch`/`worker:dev` first** — shared `dist`).
+  `npm --prefix /c/dev/exiledata-ui run deploy:app` (**stop any dev server that shares `dist` first** —
+  `ng serve`, `watch`, `worker:dev`).
+- ⚠️ **Assets normally ship FIRST** (the UI fetches art from the CDN, so a UI-first deploy shows holes).
+  **But a deploy that DELETES a file the live UI still names inverts the order** — ship the UI first so
+  the running site never references a gone asset. Ask which way round before pairing the two.
   Assets repo: `npm --prefix /c/dev/exiledata-assets run deploy`. Remote D1:
   `npm --prefix /c/dev/exiledata-ui run db:migrate:remote`; one-off exec via `node
   --env-file-if-exists=C:/dev/exiledata-ui/.env C:/dev/exiledata-ui/node_modules/wrangler/bin/wrangler.js
