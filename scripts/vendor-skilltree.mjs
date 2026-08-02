@@ -17,7 +17,8 @@
 // `line:Orbit2Active`, `normalActive:Art/…png`). tree-react's spriteKeys helper asks for the BARE
 // key for structural sheets (frame/line) but the FULL key for icon/effect sheets (the variant prefix
 // is semantic there) — so frame/line get their prefix stripped, skills/mastery keep the whole key.
-import { cpSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,7 +46,23 @@ const SHEETS = [
 
 mkdirSync(OUT, { recursive: true })
 
+// ⚠️ THE SHEET FILENAMES ARE CONTENT-HASHED, AND THEY HAVE TO BE. `_headers` serves `/*.webp` as
+// `max-age=31536000, immutable` while `manifest.json` (not a .webp) revalidates normally, so at a stable
+// `frame.webp` path those two files can SKEW: a browser holding last year's sheet picks up this year's
+// rects and samples every sprite from the wrong place. `immutable` means it won't revalidate even on a
+// hard reload, so the corruption persists for the full year.
+//
+// This is not hypothetical — it shipped once on the packed tree sheets (the Genesis Wombs drew "a low
+// quality border with two different square icons inside" after the sprite caps were retuned). Those are
+// hashed now; these vendored sheets were the last stable-path pair left, and they carry the SAME risk
+// the moment a new GGG export repacks an atlas.
+//
+// The hash goes in the filename so the URL changes whenever the bytes do — `immutable` becomes true
+// rather than a lie, and a manifest can only ever be read against the sheets it was generated with.
+// `frames[].atlas` stays the LOGICAL sheet id the renderer keys textures by; `atlases` maps that id to
+// the real filename. Every consumer must resolve through `atlases` (see tree-scene.service.ts).
 const frames = {}
+const atlases = {}
 let dup = 0
 for (const sheet of SHEETS) {
   const json = JSON.parse(readFileSync(join(ASSETS, `${sheet.file}.json`), 'utf8'))
@@ -55,10 +72,29 @@ for (const sheet of SHEETS) {
     const f = val.frame
     frames[outKey] = { atlas: sheet.file, x: f.x, y: f.y, w: f.w, h: f.h }
   }
-  cpSync(join(ASSETS, `${sheet.file}.webp`), join(OUT, `${sheet.file}.webp`))
+  const webp = readFileSync(join(ASSETS, `${sheet.file}.webp`))
+  const file = `${sheet.file}.${createHash('sha256').update(webp).digest('hex').slice(0, 8)}.webp`
+  writeFileSync(join(OUT, file), webp)
+  atlases[sheet.file] = file
 }
 
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ frames }))
+// Drop superseded sheets so the directory doesn't accumulate one per vendor run. Deliberately narrow:
+// only `<sheet>.webp` and `<sheet>.<hash>.webp` for the sheets just written — the unhashed name is the
+// pre-hashing legacy file and must go, or `immutable` keeps serving it to anyone with the old URL.
+//
+// ⚠️ DEPLOY ORDER, one time only, for the hashing cutover: ship exiledata-ui BEFORE this repo. The new
+// UI reads `atlases` but falls back to `<id>.webp`, so it works against either manifest; a UI that
+// predates the fallback hardcodes `<id>.webp` and would 404 the moment these unhashed files are gone.
+// UI-then-assets has no broken window; assets-then-UI breaks every tree until the UI catches up.
+const keep = new Set(Object.values(atlases))
+const sheetNames = SHEETS.map((s) => s.file)
+const stale = readdirSync(OUT).filter((f) => {
+  const m = /^(.+?)(?:\.[0-9a-f]{8})?\.webp$/.exec(f)
+  return m && sheetNames.includes(m[1]) && !keep.has(f)
+})
+for (const f of stale) unlinkSync(join(OUT, f))
+
+writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ atlases, frames }))
 // GGG's data.json is pretty-printed (~5.1 MB). Reparse + write it minified (~2.3 MB). Brotli makes
 // the on-the-wire cost nearly identical, but minifying halves the transient decompressed text buffer
 // the browser holds before parse and shaves parse time — free, since the browser normalizes it anyway.
@@ -89,6 +125,7 @@ writeFileSync(join(OUT, 'ascendancy-tree-data.json'), JSON.stringify(ascOnly))
 const kb = (p) => `${(statSync(p).size / 1024).toFixed(0)} KB`
 console.log(`vendor-skilltree -> ${OUT}`)
 console.log(`  manifest.json: ${Object.keys(frames).length} sprite keys${dup ? ` (${dup} dup keys across sheets)` : ''}, ${kb(join(OUT, 'manifest.json'))}`)
-for (const s of SHEETS) console.log(`  ${s.file}.webp: ${kb(join(OUT, `${s.file}.webp`))}`)
+for (const s of SHEETS) console.log(`  ${atlases[s.file]}: ${kb(join(OUT, atlases[s.file]))}`)
+if (stale.length) console.log(`  removed superseded: ${stale.join(', ')}`)
 console.log(`  tree-data.json: ${kb(join(OUT, 'tree-data.json'))}`)
 console.log(`  ascendancy-tree-data.json: ${kb(join(OUT, 'ascendancy-tree-data.json'))} (${ascNodes.length} asc nodes)`)
