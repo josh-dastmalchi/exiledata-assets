@@ -94,39 +94,19 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
 
   (also `npm --prefix /c/dev/exiledata-ui run dev:status|dev:stop|dev:wait`.) Then start it with
   `npm --prefix /c/dev/exiledata-ui run start` (and `run worker:dev` when `/api` or the Cloudflare layer
-  is involved — `_redirects`, `_headers`, the `/api/patch` + `/api/news` feeds) as a background task.
+  is involved) as a background task, never via a detached spawn (a visible terminal lets `ng` prompt).
   **Do NOT reach for `Get-NetTCPConnection` / `netstat` / `taskkill` / `Get-Process` directly** — each
-  one is a prompt, and the script already encodes the traps they were needed for: `ng serve` binds IPv6
-  `[::1]:4200` (invisible to `netstat -ano -p tcp`), a wrangler/vite **zombie child keeps holding a port**
-  and answers from the asset manifest it snapshotted at ITS startup (so a freshly-built route 404s and
-  the `_redirects` line looks wrong when it isn't), and **wrangler walks upward from 8787** when its
-  ports are taken, so "the worker" can be on 8789. `status` shows start times to expose a zombie; `wait`
-  probes the whole range.
-
-  **Restart `ng serve` only for its startup-only inputs** (`angular.json`, `package.json`/`package-lock.json`,
-  `tsconfig*.json`, `app.config*.ts`, `app.routes.server.ts`, `main*.ts`, `server.ts`); `status` prints
-  **RESTART NEEDED** naming the file when one changed under the running server, and I do the restart.
-  Everything else is picked up live, each verified against the running server on 2026-09-05: component
-  edits (HMR is OFF in `angular.json`, so every save is a full reload and there is no stale-template
-  phantom), `app.routes.ts` (a new route renders server- and client-side ~4 s after the save; the old
-  "routes need a full restart / `NG04002`" rule did not reproduce and is retired), and `public/data/**`
-  (served from disk per request; the SSR parse cache revalidates on mtime, so `npm run catalog`, or
-  extraction's `sync:ui` which now runs it, is enough). Canonical table: DEVELOPMENT.md.
-- **Dev server: `ng serve` for iteration; a real build only to verify.** (This reverses an old
-  "NEVER ng serve" rule that was based on a false premise — see memory `exiledata-ui-dev-server`.)
-  `ng serve` (`npm --prefix /c/dev/exiledata-ui run start` → http://localhost:4200) **does** run
-  dev-mode **SSR + hydration + HMR**: the app has `ssr.entry: src/server.ts` configured, so it renders
-  through the *same* `server.ts` path as the prod prerender (verified — it returns fully rendered HTML,
-  not an empty `<app-root>` shell). Use it as the **daily loop** — fast, no wrangler. It is NOT
-  byte-identical to the build-time static prerender (`outputMode: static`): it renders per-request, so
-  it won't catch a build-time prerender *failure* and doesn't apply the Cloudflare layer
-  (`_headers`/`_redirects`, the `/api` worker, the `/valuation` CSR-shell rewrite). **Before
-  committing/deploying**, verify with one-shot `npm --prefix /c/dev/exiledata-ui run build` (+ `run
-  worker:dev` when you need `/api` or the CF layer). **Do NOT use `wrangler dev`/`watch` as the edit
-  loop** — wrangler snapshots its asset manifest at startup and won't re-index `watch`'s new chunk
-  hashes (→ `ChunkLoadError`). The zombie-port and IPv6 traps are the same ones the previous bullet
-  covers; `dev-servers.mjs` already handles them, so don't reach past it. `ng serve` binds IPv6:
-  browse `localhost:4200`, not `127.0.0.1:4200`.
+  one is a prompt, and the script already encodes the port traps (IPv6 listener, wrangler zombies and
+  port walking, supervisor respawn). When `status` prints **RESTART NEEDED**, I restart; otherwise a
+  running `ng serve` is current, and restarting it is not a fix for anything.
+- **Dev server: `ng serve` for iteration; a real build only to verify.** `ng serve` runs dev-mode SSR
+  (same `server.ts` as the prerender) with live reload, HMR off. It renders per request, so it cannot
+  show a build-time prerender *failure*, the Cloudflare layer (`_headers`/`_redirects`, `/api`, the CSR-shell
+  rewrite) or case-sensitive art paths: verify those with `npm --prefix /c/dev/exiledata-ui run build`
+  (+ `run worker:dev`) before committing. **Never `wrangler dev`/`watch` as the edit loop.**
+  **The single canonical account of what a running `ng serve` picks up live versus what needs a restart,
+  and of the wrangler/port traps, is the table in [`DEVELOPMENT.md`](DEVELOPMENT.md) (Local development).
+  Do not restate it here or in memory; fix it there.**
 
 ## Local dev & Cloudflare deploys — binding
 

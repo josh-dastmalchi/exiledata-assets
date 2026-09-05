@@ -86,6 +86,17 @@ the CF serving layer, and `/api`.
 > Inspect and reap them with `node scripts/dev-servers.mjs status|stop <ui|worker|assets|all>` (also
 > `npm run dev:status|dev:stop|dev:wait`); it climbs to the wrangler supervisor, which a bare `taskkill`
 > of the listener does not. This one gotcha caused most of our "local hosting is broken" time.
+>
+> The port trivia the script encodes, so nobody re-derives it: `wrangler pages dev` (the assets server on
+> 4201) holds its port in a `workerd` **child** and respawns one that accepts connections and answers
+> nothing if only the child is killed, so `stop` walks up to the supervisor and re-probes (two listeners on
+> one port is the tell). wrangler **walks upward from 8787** when a zombie holds its port, so "the worker"
+> can be on 8789 while the zombie on 8787 answers from its old manifest: a freshly built route 404s through
+> the worker while its siblings are 200, which reads as a wrong `_redirects` line and isn't; `status` shows
+> the older start time, `wait worker` probes 8787 to 8791. The assets server binds **IPv4 only** (probe
+> `127.0.0.1:4201`), `ng serve` binds **IPv6 only** (browse `localhost:4200`). Start servers as background
+> tasks, never via a detached spawn into a visible terminal, where the Angular CLI stops at its
+> autocompletion prompt (`ng config -g cli.completion.prompted true` is set to keep that from recurring).
 
 #### What a running `ng serve` picks up, and what needs a restart (verified 2026-09-05)
 
