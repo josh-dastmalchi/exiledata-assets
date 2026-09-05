@@ -28,8 +28,8 @@ The Bash allowlist matches on the command's **leading token**. `git`, `npm`, `np
    watcher is a *compound* command (leading token `tail` + a pipe) → it prompts, and **no allowlist
    entry can fix a pipe**, so mechanical allowlisting won't help. Two rules:
    (a) **Don't spin up a watcher to "verify" a low-risk edit.** A Tailwind class, a CSS-token change,
-   an HTML-only/template edit, or a docs edit **cannot break compilation** — and `ng serve` HMR
-   already recompiles on save. There is nothing to watch; just make the edit and move on.
+   an HTML-only/template edit, or a docs edit **cannot break compilation** — and `ng serve`
+   already recompiles and reloads the page on save. There is nothing to watch; just make the edit and move on.
    (b) **When you genuinely must watch a long, failure-prone run** (a real build, a deploy), write
    the watcher as a **single `node` command** (`node -e "…"` that reads/polls the log — leading
    token `node`, no pipe → allowlisted), never `tail`/`grep`.
@@ -103,10 +103,15 @@ See also memory: `bash-permission-friction`, `exiledata-extraction-tooling`.
   ports are taken, so "the worker" can be on 8789. `status` shows start times to expose a zombie; `wait`
   probes the whole range.
 
-  **Editing the root routes array (`app.routes.ts`) or any bootstrap config requires a FULL `ng serve`
-  restart** — `provideRouter(routes)` captures the array at bootstrap, so a live HMR reload does NOT
-  register a new route (symptom: `NG04002 Cannot match any routes. URL Segment: '…'` for a route that
-  nonetheless prerenders fine in a real build).
+  **Restart `ng serve` only for its startup-only inputs** (`angular.json`, `package.json`/`package-lock.json`,
+  `tsconfig*.json`, `app.config*.ts`, `app.routes.server.ts`, `main*.ts`, `server.ts`); `status` prints
+  **RESTART NEEDED** naming the file when one changed under the running server, and I do the restart.
+  Everything else is picked up live, each verified against the running server on 2026-09-05: component
+  edits (HMR is OFF in `angular.json`, so every save is a full reload and there is no stale-template
+  phantom), `app.routes.ts` (a new route renders server- and client-side ~4 s after the save; the old
+  "routes need a full restart / `NG04002`" rule did not reproduce and is retired), and `public/data/**`
+  (served from disk per request; the SSR parse cache revalidates on mtime, so `npm run catalog`, or
+  extraction's `sync:ui` which now runs it, is enough). Canonical table: DEVELOPMENT.md.
 - **Dev server: `ng serve` for iteration; a real build only to verify.** (This reverses an old
   "NEVER ng serve" rule that was based on a false premise — see memory `exiledata-ui-dev-server`.)
   `ng serve` (`npm --prefix /c/dev/exiledata-ui run start` → http://localhost:4200) **does** run

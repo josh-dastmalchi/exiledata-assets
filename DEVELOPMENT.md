@@ -70,7 +70,7 @@ Art comes from the assets dev server: run `npm --prefix /c/dev/exiledata-assets 
 *Mode 2 — verify the deploy shape (before committing/pushing, or when touching `/api` or headers):*
 
 ```sh
-npm --prefix /c/dev/exiledata-ui run build     # ng build → dist/exiledata-ui/browser (prerenders ~6200 routes)
+npm --prefix /c/dev/exiledata-ui run build     # ng build → dist/exiledata-ui/browser (prerenders ~7200 routes)
 npm --prefix /c/dev/exiledata-ui run worker:dev  # wrangler dev → serves the build + /api/* on :8787
 ```
 
@@ -80,19 +80,37 @@ npm --prefix /c/dev/exiledata-ui run worker:dev  # wrangler dev → serves the b
 the CF serving layer, and `/api`.
 
 > ⚠️ **Never run `wrangler dev` / `watch` as the edit loop.** wrangler snapshots its asset manifest at
-> **startup** and does not re-index — so `watch`'s changing chunk hashes 404 (`ChunkLoadError`). Worse,
-> wrangler (`workerd`) and vite leave **zombie child processes** holding their ports after you stop the
-> parent, including on **IPv6** (`[::1]:4200`, `[::1]:8787`) which `netstat -ano -p tcp` does **not**
-> show. Before restarting a server, reap stragglers: `netstat -ano | findstr :4200` (plain, both
-> stacks) → `taskkill /F /PID <pid>`. This one gotcha caused most of our "local hosting is broken" time.
-- **Catalog inputs are vendored** in `data-src/` (committed). copy-catalog reads them at build (was the
-  sibling extraction repo). After re-extracting, refresh with `npm --prefix /c/dev/exiledata-extraction/dat-export
-  run sync:ui` and commit `exiledata-ui/data-src`. (Override the source path with `CATALOG_SRC` if needed.)
+> **startup** and does not re-index, so a rebuild's new chunk hashes 404 (`ChunkLoadError`). wrangler
+> (`workerd`) and vite also leave **zombie child processes** holding their ports after the parent stops,
+> including on **IPv6** (`[::1]:4200`, `[::1]:8787`), which `netstat -ano -p tcp` does **not** show.
+> Inspect and reap them with `node scripts/dev-servers.mjs status|stop <ui|worker|assets|all>` (also
+> `npm run dev:status|dev:stop|dev:wait`); it climbs to the wrangler supervisor, which a bare `taskkill`
+> of the listener does not. This one gotcha caused most of our "local hosting is broken" time.
+
+#### What a running `ng serve` picks up, and what needs a restart (verified 2026-09-05)
+
+Each row was checked against the running server by editing and then fetching the server-rendered page.
+
+| Change | Picked up live? | Notes |
+| --- | --- | --- |
+| Component template or class | **Yes**, ~4 s, full page reload | HMR is **off** (`serve.options.hmr: false` in `angular.json`). Template HMR had repeatedly left a stale compiled template running against a new class (bindings resolving to `undefined`, `ctx.<removed> is not a function`, art silently vanishing), each time diagnosed as a code bug first. Every change is now a full reload; delete that option to get HMR back. |
+| `app.routes.ts` | **Yes**, ~4 s | A new route renders server-side, and after the reload the server pushes to the open tab, client-side too. The old rule that the routes array needs a full restart (`NG04002`) did not reproduce and is retired. |
+| `public/**`, incl. `public/data/**` | **Yes**, next request | Served from disk per request, new files included. The SSR-side parse cache (`server-data.interceptor.ts`) revalidates on mtime, so `npm run catalog` (or extraction's `sync:ui`, which now runs it) is enough. |
+| `angular.json`, `package.json` / `package-lock.json`, `tsconfig*.json`, `app.config*.ts`, `app.routes.server.ts`, `main*.ts`, `server.ts` | **No**, restart | Read once at startup. `npm run dev:status` prints **RESTART NEEDED** naming the file when one changed under the running server. |
+
+What `ng serve` can never show, because it renders per request: a build-time prerender **failure**, the
+Cloudflare layer (`_headers`/`_redirects`, the `/valuation` CSR-shell rewrite, `/api`), and case-sensitive
+art paths (Windows and the local assets server are case-insensitive, Cloudflare is not). Those need Mode 2.
+
+- **Catalog inputs are vendored** in `data-src/` (committed). copy-catalog reads them at prestart/prebuild.
+  After re-extracting, refresh with `npm --prefix /c/dev/exiledata-extraction/dat-export run sync:ui`: it
+  copies into `data-src/` and then re-stages `public/data/` (`--no-stage` to skip), so a running dev server
+  shows the new data on the next request. Commit `exiledata-ui/data-src`. (Override the source path with
+  `CATALOG_SRC` if needed.)
 - **API base**: `environment.development.ts` → `apiUrl: http://localhost:8787/api`; production
-  `environment.ts` → `/api` (same-origin). So the watched build expects the worker (or a shim) on **:8787**.
-- **Restart the watch after adding a new lazy-loaded component or installing a dep** — esbuild caches module
-  resolution and won't pick up brand-new files.
-- Verify a real build: `npm --prefix /c/dev/exiledata-ui run build` (prerenders ~6200 routes). Its
+  `environment.ts` → `/api` (same-origin). So the dev build expects the worker (or a shim) on **:8787**.
+- `npm run watch` (a dev-config `ng build --watch`) writes to `dist/watch`, never to the deploy dir.
+- Verify a real build: `npm --prefix /c/dev/exiledata-ui run build` (prerenders ~7200 routes). Its
   `postbuild` also runs `scripts/verify-build.mjs`, which **fails the build** if any prerendered page
   contains `localhost`/`REPLACE_ME` — i.e. a dev-config or mixed artifact. That guard used to live only
   in `deploy-app.mjs` (the local fallback deploy), so the git path that actually ships skipped it.
@@ -169,15 +187,15 @@ Cron `0 * * * *`.
 
 - **Git-based (preferred):** Cloudflare **Workers Builds** connected to `github.com/josh-dastmalchi/exiledata-ui`.
   Build command `npm ci && npm run build`; deploy `wrangler deploy` (Workers Builds runs it). One CI run
-  prerenders (~6200 routes, ~60s) and deploys worker + assets. Enable build caching for `node_modules` +
+  prerenders (~7200 routes, ~60s) and deploys worker + assets. Enable build caching for `node_modules` +
   `.angular/cache`. Push to `main` = deploy.
   ⚠️ **That build command is the ONLY thing this deploy runs — no lint, no typecheck, no tests.** In
   particular `wrangler deploy` bundles the worker with esbuild, which strips types **without checking**,
   so a worker type error ships. `npm run typecheck:worker` is not optional. The `.husky/pre-push` hook
-  runs `npm run check` (format + typecheck:worker + lint + all 98 tests, ~35s) as the stand-in for CI.
+  runs `npm run check` (format + typecheck:worker + lint + all 116 tests, ~55s) as the stand-in for CI.
 - **Local fallback:** `npm --prefix /c/dev/exiledata-ui run deploy:app` — builds, refuses to upload if any
-  prerendered HTML contains `localhost`/`REPLACE_ME`, then `wrangler deploy`. **Stop the dev `watch`/`worker:dev`
-  first** (they write the same `dist`).
+  prerendered HTML contains `localhost`/`REPLACE_ME`, then `wrangler deploy`. **Stop `worker:dev` first** (it serves
+  that `dist`; `watch` builds to `dist/watch`).
 - **DB migrations:** `npm --prefix /c/dev/exiledata-ui run db:migrate:local` (local) /
   `db:migrate:remote` (remote). Secrets via `wrangler secret put` (never in `.env`).
 - **Remote D1 one-off exec / seed:**
@@ -236,10 +254,11 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
 - ⚠️ **Windows drive-letter casing:** invoke `npm`/`node` with an **uppercase** drive (`C:/dev/...`). A
   lowercase `c:/` makes `vitest` load its runner twice → every test errors `Cannot read properties of
   undefined (reading 'config')` (vitest #5251). Same class of bug can bite other path-keyed tools.
-- ⚠️ re-extracted the catalog? run extraction's `sync:ui` and commit `exiledata-ui/data-src` (else CI builds stale data).
-- ⚠️ installed a new dep? restart `ng serve` (esbuild caches module resolution). Stopping any dev
-  server? reap zombie children on its port — incl. IPv6 `[::1]` — with plain `netstat -ano` (not `-p
-  tcp`) → `taskkill /F /PID` before restarting.
+- ⚠️ re-extracted the catalog? run extraction's `sync:ui` (copies to `data-src/` and re-stages `public/data/`)
+  and commit `exiledata-ui/data-src` (else CI builds stale data).
+- ⚠️ dev server looks behind the code? `npm run dev:status`: it names the startup-only file that changed
+  (restart) or says `public/data` is older than `data-src` (`npm run catalog`). Everything else is live; see
+  the table above. Stop/reap with `dev:stop`, never `taskkill` on the listener.
 - ❌ **NEVER `npm run deploy` / `wrangler deploy` the standalone `/c/dev/exiledata-worker`** — it's RETIRED and
   shares the worker name `exiledata-worker` but has no `[assets]`, so a manual deploy CLOBBERS the git-deployed
   consolidated worker → the whole site 404s (root → Hono `{"error":"not_found"}`; `/api` still works). Caused an
@@ -248,4 +267,4 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
 - ⚠️ `/api/valuation/snapshot`: worker sends `max-age=0, s-maxage=300` (browsers revalidate; edge 5min); a zone
   **Cache Rule scoped to `/api` = "Respect origin"** stops CF's default 4h Browser Cache TTL from overriding it.
   `/api/currency/*` is not cached. Token can't purge cache or manage routes/rules (dashboard only).
-- ⚠️ stop the UI `watch`/`worker:dev` before `npm run deploy:app` (they share `dist`).
+- ⚠️ stop `worker:dev` before `npm run deploy:app` (it serves the `dist` the build rewrites).
