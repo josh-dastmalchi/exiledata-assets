@@ -235,6 +235,26 @@ Cron `0 * * * *`.
   does the same work in bounded chunks and records the migration as applied itself. Expect
   `db:migrate:status -- --remote` to list it as pending until that script has run.
 
+  ⚠️ **`0013_cx_league.sql` is DESTRUCTIVE and has a third step after the push.** It rebuilds
+  `currency_snapshots` with `league` in the primary key and **drops every existing row without copying
+  it** — the old rows predate the column and nothing records which league they came from, so they can
+  only be rebuilt, not relabelled. Ordering matters in both directions here (old code cannot write the
+  new table, new code cannot write the old one), so do all three between Cron ticks — the hourly trigger
+  fires at `:00` and a deploy takes ~2 min, so starting around `:05` costs zero failed ticks:
+
+  ```sh
+  npm --prefix /c/dev/exiledata-ui run db:migrate:remote     # 1. rebuild the table (drops the old rows)
+  git -C /c/dev/exiledata-ui push                            # 2. deploy the per-league derivation
+  node --env-file-if-exists=C:/dev/exiledata-ui/.env \
+    C:/dev/exiledata-ui/node_modules/wrangler/bin/wrangler.js \
+    workflows trigger currency-rederive --config C:/dev/exiledata-ui/wrangler.toml   # 3. rebuild history
+  ```
+
+  Step 3 replays the R2 archive (which never lost the league — see Data features below) newest hour
+  first, so the boards recover within seconds and the history fills in behind them; it defaults to
+  `CX_RETAIN_DAYS` of history and resumes from its own cursor if re-triggered. `/currency/flips` and
+  `/currency/pairs` keep serving from `board_cache` throughout, which the migration does not touch.
+
   Secrets via `wrangler secret put` (never in `.env`).
 - **Remote D1 one-off exec / seed:**
   ```sh
@@ -277,6 +297,14 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
   ingest in `scheduled()`) → **`GET /api/currency/flips`** (and `/api/currency/pairs`). UI: the arbitrage
   panel on the `/valuation` landing. Backbone-only by design — the full currency graph is too noisy to
   price. See the worker README and the plan for the why.
+  **Every public league is stored and labelled** (0013). Several run at once — a new league launches while
+  the previous one keeps running, and poe2scout flags all of them `IsCurrent` — so each row carries the
+  league its own market named for that hour. Reads default to the primary league (the `pickCurrentLeague`
+  softcore-trade pick, recorded in `cx_leagues` so the response path never calls poe2scout) and take
+  `?league=`; `GET /api/currency/leagues` lists what is available. D1 keeps `CX_RETAIN_DAYS` (90) of
+  hourly rows and the harvest trims one hour per league per tick; **R2 is the forever archive** —
+  `currency-exchange/<realm>/<hourTs>.json`, every public league, immutable — and D1 is a serving index
+  over it, rebuildable at any time with the `currency-rederive` Workflow.
   ⚠️ This doc used to say `GET /api/currency/arbitrage`; **there is no such route.** It fell through to
   `/currency/:currency` and answered `404 {"error":"currency_not_found","currency":"arbitrage"}` — a
   wrong path that looks like a missing-data bug rather than a bad URL. The real routes are
