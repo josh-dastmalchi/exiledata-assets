@@ -207,8 +207,35 @@ Cron `0 * * * *`.
 - **Local fallback:** `npm --prefix /c/dev/exiledata-ui run deploy:app` — builds, refuses to upload if any
   prerendered HTML contains `localhost`/`REPLACE_ME`, then `wrangler deploy`. **Stop `worker:dev` first** (it serves
   that `dist`; `watch` builds to `dist/watch`).
-- **DB migrations:** `npm --prefix /c/dev/exiledata-ui run db:migrate:local` (local) /
-  `db:migrate:remote` (remote). Secrets via `wrangler secret put` (never in `.env`).
+- **DB migrations — APPLIED BY HAND, and they are NOT part of the deploy.** This is deliberate (an
+  automatic migrate-on-deploy would run schema changes with no one watching), but it means the deploy
+  and the schema can disagree:
+
+  ```sh
+  npm --prefix /c/dev/exiledata-ui run db:migrate:status              # what's pending LOCALLY
+  npm --prefix /c/dev/exiledata-ui run db:migrate:status -- --remote  # what's pending in PRODUCTION
+  npm --prefix /c/dev/exiledata-ui run db:migrate:local               # apply locally
+  npm --prefix /c/dev/exiledata-ui run db:migrate:remote              # apply to production
+  ```
+
+  ⚠️ **An ADDITIVE migration must be applied BEFORE the code that reads it is pushed.** Workers Builds
+  runs only `npm ci && npm run build && wrangler deploy` — no migrate step — so pushing first ships code
+  that selects a column the live database does not have, and every affected insert/select 500s until
+  someone remembers. Order: `db:migrate:remote`, verify with `db:migrate:status -- --remote`, then push.
+  (A migration that only REMOVES things is the safe direction — push first, migrate after.)
+
+  `db:migrate:status` exits non-zero while anything is pending, so it is the thing to run before a
+  worker push and after adding a migration file; it compares `worker/migrations/*.sql` against the
+  `d1_migrations` table in the target database.
+
+  ⚠️ **One migration is deliberately not applied by `db:migrate:remote`:**
+  `0012_item_prices_drop_raw.sql`. SQLite implements `ALTER TABLE … DROP COLUMN` by rewriting every row,
+  which the production `item_prices` is far too large for (a bare `SUM(LENGTH(raw))` over it already
+  returns D1 `internal error [code: 7500]`). `worker/scripts/prune-item-prices.mjs --remote --confirm`
+  does the same work in bounded chunks and records the migration as applied itself. Expect
+  `db:migrate:status -- --remote` to list it as pending until that script has run.
+
+  Secrets via `wrangler secret put` (never in `.env`).
 - **Remote D1 one-off exec / seed:**
   ```sh
   node --env-file-if-exists=C:/dev/exiledata-ui/.env \
