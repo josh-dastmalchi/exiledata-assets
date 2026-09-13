@@ -4,7 +4,7 @@ Thumbs.db
 desktop.ini
 
 # This repo holds only committed .webp art + .webm videos + Cloudflare Pages config (_headers).
-# No build output — the extraction tooling lives in exiledata-api/dat-export and writes its delta
+# No build output — the extraction tooling lives in exiledata-extraction/dat-export and writes its delta
 # directly into this tree. The only npm use is `npm start` (local wrangler dev server via npx) and
 # `npm run deploy` (stage + wrangler upload); nothing is installed into the repo, but guard against
 # it and the staging/scratch output just in case.
