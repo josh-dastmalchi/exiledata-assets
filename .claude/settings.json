@@ -1,3 +1,18 @@
 {
-  "disableClaudeAiConnectors": true
+  "disableClaudeAiConnectors": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["C:/dev/exiledata-extraction/dat-export/patch-status.ts", "--quiet", "--hook"],
+            "timeout": 20,
+            "statusMessage": "Checking for an unextracted PoE2 patch"
+          }
+        ]
+      }
+    ]
+  }
 }
