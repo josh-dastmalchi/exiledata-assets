@@ -292,8 +292,10 @@ output `dist-deploy` — keeps the 60fps-source exclusion + file-count guard). �
 ## Data features (where the pieces live)
 
 - **Valuation** (auth-free): poe2scout `ByCategory` → `item_prices`/`valuations`/`price_daily` in D1;
-  `finalize` publishes `valuation/<realm>/latest.json` to R2 → `GET /api/valuation/snapshot`. UI: `/valuation`.
-- **Currency arbitrage** (auth-free): poe2scout `SnapshotPairs` → `currency_snapshots` (hourly, ungated
+  `finalize` publishes `valuation/<realm>/latest.json` to R2 → `GET /api/valuation/snapshot`. UI: `/market`.
+  Currency rows the exchange trades take a 24h VWAP from `currency_snapshots` instead of poe2scout's value
+  (`provenance: 'exchange'`, `traded24h`; `worker/src/exchangeValuation.ts`). Uniques stay poe2scout.
+- **Currency arbitrage** (auth-free): GGG's public Currency Exchange feed → `currency_snapshots` (hourly, ungated
   ingest in `scheduled()`) → **`GET /api/currency/flips`** (and `/api/currency/pairs`). UI: the arbitrage
   panel on the `/valuation` landing. Backbone-only by design — the full currency graph is too noisy to
   price. See the worker README and the plan for the why.
