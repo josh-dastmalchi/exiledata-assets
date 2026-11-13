@@ -30,8 +30,14 @@ const OUT = join(root, 'skilltree')
 // Atlas sheets the base render needs. `strip` drops the `<sheet>:` prefix (structural sheets whose
 // prefix is not part of the key the renderer asks for). Centre-hub art (background-*, group-
 // background) is intentionally omitted — the renderer falls back to a vector hub without it.
-// Playable classes that have a background-<class>.webp (portrait + ascendancy discs).
-const CLASSES = ['druid', 'huntress', 'mercenary', 'monk', 'ranger', 'sorceress', 'warrior', 'witch']
+// Playable classes that have a background-<class> sheet (portrait + ascendancy discs). Read from the
+// export rather than listed: a hand-kept list would silently skip a class a new export adds (the Duelist
+// at 1.0), leaving it with no portrait or ascendancy discs on the tree and nothing failing.
+const CLASSES = readdirSync(ASSETS)
+  .map((f) => /^background-(.+)\.json$/.exec(f)?.[1])
+  .filter(Boolean)
+  .sort()
+if (!CLASSES.length) throw new Error(`no background-<class>.json sheets in ${ASSETS}; is the export checked out?`)
 const SHEETS = [
   { file: 'skills', strip: false }, // node icons; keys already `<variant>Active:<icon>`
   { file: 'mastery-effect-active', strip: false }, // notable/mastery background patterns
